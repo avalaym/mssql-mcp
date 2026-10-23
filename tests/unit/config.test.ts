@@ -186,6 +186,7 @@ test("loadConfigFromEnv - authType defaults to sql and ignores DB_DOMAIN", () =>
   const c = loadConfigFromEnv({ ...base, DB_DOMAIN: "EXAMPLE", DB_USER: "analyst@contoso" });
   assert.equal(c.authType, "sql");
   assert.equal(c.user, "analyst@contoso");
+  assert.equal(c.domain, undefined);
 });
 
 test("loadConfigFromEnv - ntlm complete, case and whitespace tolerant", () => {

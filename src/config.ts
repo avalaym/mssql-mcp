@@ -34,7 +34,7 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Databas
     user: env.DB_USER,
     password: env.DB_PASSWORD,
     authType,
-    domain: env.DB_DOMAIN,
+    domain: authType === "ntlm" ? env.DB_DOMAIN : undefined,
     port: env.DB_PORT ? parseInt(env.DB_PORT, 10) : DEFAULT_PORT,
     encrypt: env.DB_ENCRYPT !== "false",
     trustServerCertificate: env.DB_TRUST_SERVER_CERTIFICATE === "true",

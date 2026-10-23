@@ -228,10 +228,12 @@ Read-only mode is **on by default**. It is defense in depth, not a guarantee: it
 **What it does**
 
 - `mssql_run_sql_query` accepts a single `SELECT` or `WITH` statement only. Comments (`--`, `/* */`) and `;` (other than a trailing one) are rejected.
+- T-SQL does not require `;` between statements (`SELECT 1 COMMIT` is two statements), so the scanner also rejects transaction-control and statement-leading verbs as whole words: `COMMIT`, `ROLLBACK`, `SAVE`, `BEGIN`, `TRAN`, `TRANSACTION`, `SET`, `USE`, `DECLARE`, `WRITETEXT`, `UPDATETEXT`, `READTEXT`, `ENABLE`, `DISABLE`, `ADD`, `SEND`, `RECEIVE`, `MOVE`, `CONVERSATION`, `DIALOG`, `SETUSER`, `REVERT`, `CHECKPOINT`, `RAISERROR`, `THROW`, `PRINT`, `GOTO`, `IF`, `WHILE`, `RETURN`, `OPEN`, `CLOSE`, `DEALLOCATE` and `CURSOR`. This also rejects harmless uses such as `OPTION (USE HINT ...)`.
 - Statements containing write, DDL, execution or administration keywords are rejected: `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `INTO`, `TRUNCATE`, `DROP`, `CREATE`, `ALTER`, `EXEC`, `EXECUTE`, `GRANT`, `REVOKE`, `DENY`, `BACKUP`, `RESTORE`, `DBCC`, `KILL`, `SHUTDOWN`, `RECONFIGURE`, `WAITFOR`, `OPENROWSET`, `OPENQUERY`, `OPENDATASOURCE`, `BULK`, `xp_`/`sp_` procedure names that are not schema-qualified (`EXEC` itself is also rejected), and the phrase `NEXT VALUE FOR`.
 - Unbalanced quotes or brackets are rejected (the filter fails closed when it cannot tell what is a literal).
-- Every query, including `mssql_read_table_rows`, runs inside a transaction that is always rolled back, with a lock timeout.
-- `whereClause` in `mssql_read_table_rows` goes through the same filter in every mode, including when read-only mode is off.
+- Every `mssql_run_sql_query` (read-only mode) and `mssql_read_table_rows` query runs inside a transaction that is always rolled back, with a lock timeout. The catalog, column, database and session queries do not.
+- A boundary tripwire compares `CURRENT_TRANSACTION_ID()` and `@@TRANCOUNT` before and after each query; if the transaction changed, the result is discarded and the connection is closed. This requires SQL Server 2016 or later. `SET LOCK_TIMEOUT` is reset to its default before the rollback, because it persists on pooled connections; if the reset fails the connection is discarded.
+- `whereClause` in `mssql_read_table_rows` goes through the same text checks in every mode, including when read-only mode is off, except the `SELECT`/`WITH` requirement.
 - The stored-procedure tool and the five deprecated aliases are not registered.
 
 **What it cannot undo**
@@ -240,7 +242,7 @@ Read-only mode is **on by default**. It is defense in depth, not a guarantee: it
 - User-defined functions with side effects invoked from a `SELECT`.
 - Anything reachable from a read that acts outside the database: `xp_cmdshell`, Database Mail and linked servers, if the account is allowed to use them.
 
-**Check the principal.** `mssql_connect_database` and `mssql_connection_status` report `read_only`, `session.login_name`, `session.auth_scheme` and `session.principal` (`is_sysadmin`, `is_db_owner`, `is_db_datawriter`, `has_insert`, `has_update`, `has_delete`, `has_alter`, `can_write`). When read-only mode is on and the principal can write, a warning is included. `can_write` is a hint, not an audit: it uses database-level checks only. Per-table grants and custom roles are not detected, so `false` means "no write permission found in the places checked", not "cannot write".
+**Check the principal.** `mssql_connect_database` and `mssql_connection_status` report `read_only`, `session.login_name`, `session.auth_scheme` and `session.principal` (`is_sysadmin`, `is_db_owner`, `is_db_datawriter`, `has_insert`, `has_update`, `has_delete`, `has_alter`, `can_write`). When read-only mode is on and the principal can write, `mssql_connect_database` adds a warning to its text; the status tool and the resource expose `session.principal.can_write` without the warning text. `can_write` is a hint, not an audit: it uses database-level checks only. Per-table grants and custom roles are not detected, so `false` means "no write permission found in the places checked", not "cannot write".
 
 **The real control is a read-only account.** Connect with a login that has only `SELECT` (for example membership in `db_datareader` and nothing else) and no access to `xp_cmdshell`, Database Mail or linked servers.
 

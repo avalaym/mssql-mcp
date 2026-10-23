@@ -68,6 +68,15 @@ test(
       const recordset = queryResult.structuredContent?.recordset as Array<{ value: number }> | undefined;
       assert.equal(recordset?.[0]?.value, 1);
 
+      const tranCount = await callTool(client, "mssql_run_sql_query", { query: "SELECT @@TRANCOUNT AS n" });
+      assert.equal(tranCount.isError, undefined, `trancount failed: ${describeFailure(tranCount)}`);
+      const trancountRows = tranCount.structuredContent?.recordset as Array<{ n: number }> | undefined;
+      assert.equal(trancountRows?.[0]?.n, 1);
+
+      const commit = await callTool(client, "mssql_run_sql_query", { query: "SELECT 1 COMMIT" });
+      assert.equal(commit.isError, true);
+      assert.match(describeFailure(commit), /forbidden keyword "COMMIT"/);
+
       const expectedScheme = (process.env.DB_AUTH_TYPE ?? "sql").trim().toLowerCase() === "ntlm" ? "NTLM" : "SQL";
       const session = (connectResult.structuredContent?.session ?? {}) as {
         auth_scheme?: string;
