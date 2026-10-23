@@ -28,11 +28,15 @@ const FATAL_INSPECT_DEPTH = 4;
 const FATAL_MAX_LINES = 200;
 // Defence in depth: the drivers in use attach only code/cause/originalError to
 // their errors, but an arbitrary application error may carry a config object.
-const REDACT_KEY_PATTERN = /((?:^|[\s{,])(?:password|pwd|secret|token|authorization)\s*:\s*)(['"`])(?:(?!\2).)*\2/gi;
+// Masks the value of a credential-like key whether util.inspect rendered it
+// as a quoted string, a number/boolean/identifier, or the first line of a
+// nested object (nested credential keys are masked by the same pass).
+const REDACT_KEY_PATTERN =
+  /((?:^|[\s{,])(?:password|pwd|secret|token|authorization)\s*:\s*)(?:(['"`])(?:(?!\2).)*\2|[^,\n}]+)/gi;
 
 export function formatFatalError(error: unknown): string {
   const inspected = inspect(error, { depth: FATAL_INSPECT_DEPTH, breakLength: 120 });
-  const redacted = inspected.replace(REDACT_KEY_PATTERN, "$1'[redacted]'");
+  const redacted = inspected.replace(REDACT_KEY_PATTERN, "$1[redacted]");
   const lines = redacted.split("\n");
   if (lines.length <= FATAL_MAX_LINES) return redacted;
   const kept = lines.slice(0, FATAL_MAX_LINES - 1);

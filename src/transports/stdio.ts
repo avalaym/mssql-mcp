@@ -15,7 +15,7 @@ export async function runStdioTransport(server: McpServer): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     console.error(`\nShutting down (${reason})...`);
-    setTimeout(() => {
+    const forceExit = setTimeout(() => {
       console.error(`Shutdown timed out after ${SHUTDOWN_TIMEOUT_MS}ms; exiting.`);
       process.exit(exitCode);
     }, SHUTDOWN_TIMEOUT_MS).unref();
@@ -25,6 +25,7 @@ export async function runStdioTransport(server: McpServer): Promise<void> {
     } catch (err) {
       console.error("Error during shutdown:", formatFatalError(err));
     }
+    clearTimeout(forceExit);
     process.exit(exitCode);
   };
 

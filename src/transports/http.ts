@@ -37,7 +37,7 @@ export async function runHttpTransport(server: McpServer, config: HttpConfig): P
     if (shuttingDown) return;
     shuttingDown = true;
     console.error(`\nShutting down HTTP server (${reason})...`);
-    setTimeout(() => {
+    const forceExit = setTimeout(() => {
       console.error(`Shutdown timed out after ${SHUTDOWN_TIMEOUT_MS}ms; exiting.`);
       process.exit(exitCode);
     }, SHUTDOWN_TIMEOUT_MS).unref();
@@ -49,6 +49,7 @@ export async function runHttpTransport(server: McpServer, config: HttpConfig): P
     } catch (err) {
       console.error("Error during shutdown:", formatFatalError(err));
     }
+    clearTimeout(forceExit);
     process.exit(exitCode);
   };
 

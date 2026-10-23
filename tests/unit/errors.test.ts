@@ -112,8 +112,10 @@ test("formatFatalError - does not throw for objects without toString or with a t
 test("formatFatalError - handles circular object graphs", () => {
   const obj: Record<string, unknown> = { name: "root" };
   obj.self = obj;
-  assert.doesNotThrow(() => formatFatalError(obj));
-  assert.ok(formatFatalError(obj).includes("root"));
+  let result = "";
+  assert.doesNotThrow(() => { result = formatFatalError(obj); });
+  assert.ok(result.includes("root"));
+  assert.ok(result.includes("[Circular"));
 });
 
 test("formatFatalError - bounds the total output for a huge object", () => {
@@ -132,6 +134,14 @@ test("formatFatalError - redacts credential-like fields", () => {
   assert.ok(!result.includes("tok-value"));
   assert.ok(result.includes("[redacted]"));
   assert.ok(result.includes("svc"));
+});
+
+test("formatFatalError - redacts unquoted credential values (numbers, identifiers, nested objects)", () => {
+  const result = formatFatalError({ pwd: 123456, secret: true, authorization: { bearer: "abc-value" }, user: 7 });
+  assert.ok(!result.includes("123456"));
+  assert.ok(!result.includes("true"));
+  assert.ok(!result.includes("abc-value"));
+  assert.ok(result.includes("user: 7"));
 });
 
 test("formatFatalError - stringifies primitive values", () => {

@@ -201,4 +201,6 @@ test("normalizeOutput - recordset rows get the same depth budget as plain object
   const viaRecordset = JSON.stringify(normalizeOutput(build(true)));
   const viaPlain = JSON.stringify(normalizeOutput(build(false)));
   assert.equal(viaRecordset, viaPlain);
+  assert.ok(viaPlain.includes("max depth exceeded"));
+  assert.ok(!viaPlain.includes("leaf"));
 });
