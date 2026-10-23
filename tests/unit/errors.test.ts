@@ -201,6 +201,14 @@ test("formatFatalError - masks connection-string credentials inside an error mes
   assert.ok(result.includes("Encrypt=true"));
 });
 
+test("formatFatalError - masks quoted connection-string credentials inside an error message", () => {
+  const single = new Error(`Login failed: ${PASSWORD_KEY}='fixture value 10';User=sa`);
+  const double = new Error(`Login failed: ${PASSWORD_KEY}="fixture value 11";User=sa`);
+  assert.ok(!formatFatalError(single).includes("fixture value 10"));
+  assert.ok(!formatFatalError(double).includes("fixture value 11"));
+  assert.ok(formatFatalError(single).includes("User=sa"));
+});
+
 test("formatFatalError - bounds the total output in bytes", () => {
   const wide: Record<string, string> = {};
   for (let i = 0; i < 50; i++) wide[`k${i}`] = "x".repeat(9_000);

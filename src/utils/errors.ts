@@ -58,8 +58,12 @@ const REDACT_INLINE_PATTERN = new RegExp(
 );
 
 // Connection-string form inside a message or stack: `Password=...;`,
-// `pwd=...`, `token=...` (terminated by `;`, whitespace, a quote or end).
-const REDACT_ASSIGNMENT_PATTERN = new RegExp(String.raw`\b(${REDACT_KEY}\s*=\s*)[^;\s'"\x60]+`, "gi");
+// `pwd='...'`, `token="..."` (quoted with ', " or `, or terminated by `;`,
+// whitespace or end).
+const REDACT_ASSIGNMENT_PATTERN = new RegExp(
+  String.raw`\b(${REDACT_KEY}\s*=\s*)(?:(['"\x60])(?:(?!\2).)*\2|[^;\s'"\x60]+)`,
+  "gi"
+);
 
 function redactCredentials(text: string): string {
   return text
