@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - ESLint (`eslint` + `typescript-eslint`, flat config) with `npm run lint`, plus
   `npm run check` guards that fail when a `tests/unit/*.test.ts` file is not
   wired into `npm test` or when `package.json` and `SERVER_VERSION` diverge.
+- Unit tests for both guard scripts (`tests/unit/repo-guards.test.ts`).
 - CI workflow split into `lint`, `unit` (Node 20/22/24), `integration`
   (SQL Server 2022) and a single `CI passed` status job for branch protection;
   runs with read-only token permissions, per-PR concurrency cancellation and

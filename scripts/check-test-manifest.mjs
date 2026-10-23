@@ -2,14 +2,16 @@
 // Guard: `npm test` lists unit test files explicitly, so a new
 // tests/unit/*.test.ts file is silently ignored until it is added to the
 // "test" script in package.json. Fail CI when that happens.
+//
+// Usage: node scripts/check-test-manifest.mjs [repo-root]   (default: cwd)
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
-const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+const root = resolve(process.argv[2] ?? process.cwd());
+const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const testScript = pkg.scripts?.test ?? "";
 
-const unitDir = join("tests", "unit");
-const expected = readdirSync(unitDir)
+const expected = readdirSync(join(root, "tests", "unit"))
   .filter((f) => f.endsWith(".test.ts"))
   .map((f) => `dist/tests/unit/${f.replace(/\.ts$/, ".js")}`)
   .sort();

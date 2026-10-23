@@ -20,7 +20,7 @@ jobs:
   # Fast, DB-free gate: lint + repo invariants (every unit test wired into
   # `npm test`, package.json version in sync with src/constants.ts).
   lint:
-    name: Lint & checks
+    name: Lint & repo checks
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
