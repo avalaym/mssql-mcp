@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Versioned package publishing. Pushing a `vX.Y.Z` tag runs
+  `.github/workflows/release.yml`, which verifies the tag against
+  `package.json` (`scripts/check-release-tag.mjs`), runs the full CI gate,
+  smoke-tests the packed tarball, and then publishes `@avalaym/mssql-mcp` to
+  GitHub Packages and creates a GitHub Release with the tarball and its
+  SHA-256 attached (release notes come from this file via
+  `scripts/changelog-section.mjs`). The package is no longer installed from
+  npmjs.com; see README "Install" for both channels.
 - ESLint (`eslint` + `typescript-eslint`, flat config) with `npm run lint`, plus
   `npm run check` guards that fail when a `tests/unit/*.test.ts` file is not
   wired into `npm test` or when `package.json` and `SERVER_VERSION` diverge.

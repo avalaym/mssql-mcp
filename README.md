@@ -2,8 +2,9 @@
 
 🚀 **Model Context Protocol (MCP) server** for Microsoft SQL Server - compatible with Claude Desktop, Cursor, Windsurf and VS Code.
 
-[![CI](https://github.com/BYMCS/mssql-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/BYMCS/mssql-mcp/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/mssql-mcp.svg)](https://www.npmjs.com/package/mssql-mcp)
+[![CI](https://github.com/avalaym/mssql-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/avalaym/mssql-mcp/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/avalaym/mssql-mcp?sort=semver)](https://github.com/avalaym/mssql-mcp/releases)
+[![GitHub Packages](https://img.shields.io/badge/GitHub%20Packages-%40avalaym%2Fmssql--mcp-blue)](https://github.com/avalaym/mssql-mcp/pkgs/npm/mssql-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Standards Alignment
@@ -18,9 +19,49 @@
 
 ### 1. Install
 
+> This fork is **not published to npmjs.com**. Every tagged release is
+> published to [GitHub Packages](https://github.com/avalaym/mssql-mcp/pkgs/npm/mssql-mcp)
+> and attached as a tarball to the matching
+> [GitHub Release](https://github.com/avalaym/mssql-mcp/releases). Pick one
+> of the two channels below; both install the `mssql-mcp-server` command.
+
+**Option A — tarball from a GitHub Release (no authentication):**
+
 ```bash
-npm install -g mssql-mcp
+# Replace X.Y.Z with the version from https://github.com/avalaym/mssql-mcp/releases
+npm install -g https://github.com/avalaym/mssql-mcp/releases/download/vX.Y.Z/avalaym-mssql-mcp-X.Y.Z.tgz
 ```
+
+Each release also ships a `.sha256` file next to the tarball; verify with
+`sha256sum -c avalaym-mssql-mcp-X.Y.Z.tgz.sha256` after downloading both.
+
+**Option B — npm package from GitHub Packages (needs a GitHub token):**
+
+GitHub Packages requires authentication to *install* npm packages, even from
+public repositories. Create a
+[personal access token](https://github.com/settings/tokens) with the
+`read:packages` scope, then point the `@avalaym` scope at the GitHub registry:
+
+```bash
+# ~/.npmrc
+@avalaym:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=YOUR_GITHUB_TOKEN
+```
+
+```bash
+npm install -g @avalaym/mssql-mcp          # latest stable
+npm install -g @avalaym/mssql-mcp@3.0.0    # pin a version
+```
+
+Either way, check the install with:
+
+```bash
+npm ls -g @avalaym/mssql-mcp   # shows the installed version
+which mssql-mcp-server          # the command your IDE will run
+```
+
+To upgrade, install the new release the same way; to remove,
+`npm uninstall -g @avalaym/mssql-mcp`.
 
 ### 2. Configure IDE
 
@@ -29,8 +70,7 @@ npm install -g mssql-mcp
 {
   "mcpServers": {
     "mssql": {
-      "command": "npx",
-      "args": ["-y", "mssql-mcp@latest"],
+      "command": "mssql-mcp-server",
       "env": {
         "DB_SERVER": "your-server.com",
         "DB_DATABASE": "your-database",
@@ -49,8 +89,7 @@ npm install -g mssql-mcp
 {
   "servers": {
     "mssql": {
-      "command": "npx",
-      "args": ["-y", "mssql-mcp@latest"],
+      "command": "mssql-mcp-server",
       "env": {
         "DB_SERVER": "your-server.com",
         "DB_DATABASE": "your-database",
@@ -78,6 +117,8 @@ npm install -g mssql-mcp
 ```
 
 > Replace with your actual database credentials. Credentials are read from the **server environment only** — never passed as tool parameters.
+>
+> `mssql-mcp-server` is the executable installed in step 1. If your IDE cannot find it on `PATH`, use the absolute path printed by `npm root -g` (e.g. `/usr/local/lib/node_modules/@avalaym/mssql-mcp/dist/src/index.js`) with `"command": "node"`.
 
 ## ��️ Tool Catalog
 
@@ -235,4 +276,4 @@ npm run ci            # typecheck + build + test
 
 ## License
 
-[MIT](LICENSE) © BYMCS
+[MIT](LICENSE) © BYMCS — fork maintained at [avalaym/mssql-mcp](https://github.com/avalaym/mssql-mcp)
