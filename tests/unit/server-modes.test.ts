@@ -30,6 +30,14 @@ test("read-only: hides procedures and deprecated aliases, keeps primaries", asyn
     assert.equal(q?.title, "Run SQL Query (read-only)");
   } finally { await s.close(); }
 });
+test("read-only: run_sql_query description is honest about its guarantees", async () => {
+  const s = await open(true);
+  try {
+    const d = (await s.tool("mssql_run_sql_query"))?.description ?? "";
+    assert.ok(d.includes("defense in depth, not a guarantee"));
+    assert.ok(!d.includes("strict"));
+  } finally { await s.close(); }
+});
 test("read-write: everything registered, run_sql_query not read-only", async () => {
   const s = await open(false);
   try {

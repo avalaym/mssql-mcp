@@ -13,6 +13,7 @@ const accepted = [
   "SELECT * FROM T ORDER BY id OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY",
   "SELECT 1 WHERE a = 'x; y /* z */ -- w'", "SELECT 1 WHERE a = 'it''s; fine'", "SELECT * FROM dbo.Sp_NotAProc_Table",
   "SELECT [a]]b], \"Weird Name\" FROM T WHERE x = 'it''s'",
+  "SELECT IIF(1=1,'a','b')", "SELECT * FROM OPENJSON('[]')", "SELECT DATEADD(day,1,GETDATE())", "SELECT CASE WHEN 1=1 THEN 1 ELSE 0 END",
 ];
 const rejected: Array<[string, RegExp]> = [
   ["", /statement is empty/], ["   ", /statement is empty/],
@@ -35,6 +36,20 @@ const rejected: Array<[string, RegExp]> = [
   ['SELECT 1 "a\'b"; DROP TABLE T; SELECT \'x\'', /single statement/],
   ["SELECT [a]]b] FROM T; DROP TABLE T", /single statement/],
   ["SELECT 1 FROM [T", /unbalanced/],
+  ["SELECT 1 COMMIT", /forbidden keyword "COMMIT"/],
+  ["SELECT 1 ROLLBACK", /forbidden keyword "ROLLBACK"/],
+  ["SELECT 1 DISABLE TRIGGER ALL ON DATABASE COMMIT BEGIN TRAN", /forbidden keyword "DISABLE"/],
+  ["SELECT 1 DECLARE @p varbinary(16) SELECT @p=TEXTPTR(c) FROM dbo.T WRITETEXT dbo.T.c @p 'x' COMMIT", /forbidden keyword "DECLARE"/],
+  ["RECEIVE TOP(1) * FROM dbo.Q COMMIT", /must start with|forbidden keyword/],
+  ["USE master", /must start with|forbidden keyword/],
+  ["SETUSER 'dbo'", /must start with|forbidden keyword/],
+  ["SET ROWCOUNT 1", /must start with|forbidden keyword/],
+  ["SET LOCK_TIMEOUT -1", /must start with|forbidden keyword/],
+  ["RAISERROR('x',16,1) WITH LOG", /must start with|forbidden keyword/],
+  ["CHECKPOINT", /must start with|forbidden keyword/],
+  ["SAVE TRAN x", /must start with|forbidden keyword/],
+  ["IF 1=1 SELECT 1", /must start with|forbidden keyword/],
+  ["SELECT 1 SET ROWCOUNT 1", /forbidden keyword "SET"/],
 ];
 for (const s of accepted) test(`assertReadOnlyStatement accepts ${JSON.stringify(s)}`, () => assertReadOnlyStatement(s));
 for (const [s, re] of rejected) test(`assertReadOnlyStatement rejects ${JSON.stringify(s)}`, () => assert.throws(() => assertReadOnlyStatement(s), re));
@@ -46,6 +61,7 @@ const whereRejected: Array<[string, RegExp]> = [
   ["id IN (SELECT id FROM T) OR 1=(SELECT COUNT(*) FROM T WHERE x = 'a'); EXEC xp_cmdshell 'dir'", /single statement/],
   ["id = NEXT VALUE FOR dbo.Seq", /forbidden phrase/], ["a = 1 OR UPDATE", /forbidden keyword "UPDATE"/],
   ["1=1 [ ' ] ; DROP TABLE T; -- '", /single statement|unbalanced/],
+  ["1=1 DISABLE TRIGGER ALL ON dbo.T COMMIT SELECT 1 FROM dbo.T WHERE 1=1", /forbidden keyword "DISABLE"/],
 ];
 for (const s of whereAccepted) test(`assertSafeWhereClause accepts ${JSON.stringify(s)}`, () => assertSafeWhereClause(s));
 for (const [s, re] of whereRejected) test(`assertSafeWhereClause rejects ${JSON.stringify(s)}`, () => assert.throws(() => assertSafeWhereClause(s), re));

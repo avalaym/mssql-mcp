@@ -67,7 +67,7 @@ export function registerQueryTools(server: McpServer, options: ToolRegistrationO
       description: readOnly
         ? "Executes a single SELECT or WITH statement against the connected database inside a transaction that is always rolled back. " +
           "Read-only mode is defense in depth, not a guarantee: the connected principal's permissions decide what can change. " +
-          "Comments, multiple statements, and write/exec keywords are rejected. " +
+          "Comments, additional statements or transaction control, and write/exec keywords are rejected; the server also verifies the transaction boundary after each query. " +
           "Always prefer parameterized inputs via the 'parameters' field. " +
           "Example: query='SELECT * FROM dbo.Users WHERE Id = @id', parameters={id: 42}"
         : "Executes an arbitrary SQL statement against the connected database. " +
