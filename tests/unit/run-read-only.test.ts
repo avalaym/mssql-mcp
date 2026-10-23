@@ -1,16 +1,42 @@
 import { strict as assert } from "node:assert";
 import { test, mock, beforeEach, afterEach } from "node:test";
 import type sql from "mssql";
-import { runReadOnly } from "../../src/policy/read-only.js";
+import { runReadOnly, BOUNDARY_SQL } from "../../src/policy/read-only.js";
 
 type Log = string[];
-function harness(opts: { rollback?: Error; invalidate?: Error } = {}) {
+type Row = { id: string; n: number };
+interface Opts {
+  rollback?: Error;
+  invalidate?: Error;
+  beforeRow?: Row;
+  afterRow?: Row;
+  resetFails?: Error;
+  afterQueryFails?: Error;
+}
+function harness(opts: Opts = {}) {
   const log: Log = [];
+  let boundaryCalls = 0;
   const tx = {
     async begin() { log.push("begin"); },
     async rollback() { log.push("rollback"); if (opts.rollback) throw opts.rollback; },
   };
-  const request = { async batch(s: string) { log.push(`batch:${s}`); return {}; }, async query(s: string) { log.push(`query:${s}`); return { recordset: [{ v: 1 }] }; } };
+  const request = {
+    async batch(s: string) {
+      log.push(`batch:${s}`);
+      if (s === "SET LOCK_TIMEOUT -1" && opts.resetFails) throw opts.resetFails;
+      return {};
+    },
+    async query(s: string) {
+      log.push(`query:${s}`);
+      if (s === BOUNDARY_SQL) {
+        boundaryCalls++;
+        if (boundaryCalls === 2 && opts.afterQueryFails) throw opts.afterQueryFails;
+        const row = boundaryCalls === 1 ? (opts.beforeRow ?? { id: "1", n: 1 }) : (opts.afterRow ?? { id: "1", n: 1 });
+        return { recordset: [row] };
+      }
+      return { recordset: [{ v: 1 }] };
+    },
+  };
   const deps = {
     createTransaction: () => tx,
     createRequest: () => request as unknown as sql.Request,
@@ -34,7 +60,10 @@ test("(a) success + rollback ok -> result, no invalidate, LOCK_TIMEOUT before fn
   const h = harness();
   const r = await runReadOnly(h.pool, async (req) => (await req.query("SELECT 1")).recordset, h.deps);
   assert.deepEqual(r, [{ v: 1 }]);
-  assert.deepEqual(h.log, ["begin", "batch:SET LOCK_TIMEOUT 5000", "query:SELECT 1", "rollback"]);
+  assert.deepEqual(h.log, [
+    "begin", "batch:SET LOCK_TIMEOUT 5000", `query:${BOUNDARY_SQL}`, "query:SELECT 1", `query:${BOUNDARY_SQL}`,
+    "batch:SET LOCK_TIMEOUT -1", "rollback",
+  ]);
 });
 test("(b) success + rollback fails -> throws rollback error, invalidates", async () => {
   const h = harness({ rollback: new Error("boom") });
@@ -69,8 +98,29 @@ test("(h) fn fails + rollback EABORT -> fn error, no invalidate", async () => {
   await assert.rejects(runReadOnly(h.pool, async () => { throw new Error("syntax"); }, h.deps), /^Error: syntax$/);
   assert.ok(!h.log.includes("invalidate"));
 });
-test("(i) success + rollback EABORT -> result returned, no invalidate", async () => {
+test("(i) success + rollback EABORT -> rejects (fail closed), no invalidate", async () => {
   const h = harness({ rollback: abort });
-  assert.equal(await runReadOnly(h.pool, async () => 7, h.deps), 7);
+  await assert.rejects(runReadOnly(h.pool, async () => 7, h.deps), /aborted during the query/);
+  assert.ok(!h.log.includes("invalidate"));
+});
+for (const [name, afterRow] of [
+  ["(j) transaction id changed", { id: "2", n: 1 }],
+  ["(k) trancount 2", { id: "1", n: 2 }],
+  ["(l) trancount 0", { id: "1", n: 0 }],
+] as const) {
+  test(`${name} -> boundary breached, invalidates, result not returned`, async () => {
+    const h = harness({ afterRow });
+    await assert.rejects(runReadOnly(h.pool, async () => "secret", h.deps), /boundary breached; connection discarded/);
+    assert.equal(h.log.filter((l) => l === "invalidate").length, 1);
+  });
+}
+test("(m) LOCK_TIMEOUT reset fails -> cleanup failed, invalidates", async () => {
+  const h = harness({ resetFails: new Error("reset boom") });
+  await assert.rejects(runReadOnly(h.pool, async () => 1, h.deps), /cleanup failed \(reset boom\); connection discarded/);
+  assert.equal(h.log.filter((l) => l === "invalidate").length, 1);
+});
+test("(n) fn fails and the post-fn boundary query fails -> fn error, no invalidate", async () => {
+  const h = harness({ afterQueryFails: new Error("post boom") });
+  await assert.rejects(runReadOnly(h.pool, async () => { throw new Error("syntax"); }, h.deps), /^Error: syntax$/);
   assert.ok(!h.log.includes("invalidate"));
 });
