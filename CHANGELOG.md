@@ -31,11 +31,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   circular object graphs: `normalizeOutput()` in `src/utils/format.ts` now
   bounds its recursion depth (50 levels) and detects circular references
   instead of recursing without limit, which could previously overflow the
-  call stack and make reporting the resulting error itself extremely slow.
-  The `uncaughtException`/`unhandledRejection` handlers in both transports
-  also now log a bounded message/stack via `formatFatalError()` instead of
-  the raw `Error` object. Reported in
-  [#5](https://github.com/BYMCS/mssql-mcp/issues/5).
+  call stack. Recordset rows go through the same guard as any other object.
+  Reported in [#5](https://github.com/BYMCS/mssql-mcp/issues/5).
+- The `uncaughtException`/`unhandledRejection` handlers in both transports
+  now log the full error via `util.inspect` (`cause` chain, Node `code`/
+  `errno`/`syscall`, driver `number`/`lineNumber`/`originalError`,
+  `AggregateError.errors`), capped at 200 lines, with credential-like fields
+  masked. The handler can no longer throw on a non-`Error` rejection reason,
+  which previously skipped shutdown and left the pool open.
+- Shutdown after a crash now exits with status **1** instead of 0, and is
+  bounded by a 5 s timeout (`SHUTDOWN_TIMEOUT_MS`) so a hung `pool.close()`
+  cannot keep a crashed server alive. The HTTP transport's shutdown is now
+  re-entrancy guarded like the stdio one.
 - Deduplicated the deprecated alias tools (`mssql_get_schema`,
   `mssql_describe_table`, `mssql_get_table_data`, `mssql_execute_procedure`) so
   they share the same query-building/execution logic as their primary tools

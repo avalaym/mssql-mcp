@@ -15,5 +15,10 @@ export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 200;
 export const MAX_TEXT_PAYLOAD_BYTES = 100_000;
 
+// Upper bound on how long a shutdown may wait for the pool to close before
+// the process exits anyway (a hung pool.close() must not keep a crashed
+// server alive).
+export const SHUTDOWN_TIMEOUT_MS = 5000;
+
 export const HTTP_DEFAULT_HOST = "127.0.0.1";
 export const HTTP_DEFAULT_PORT = 3001;

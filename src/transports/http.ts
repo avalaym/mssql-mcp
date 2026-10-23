@@ -8,6 +8,7 @@ import {
 import type { McpServer } from "@modelcontextprotocol/server";
 import { closePoolOnShutdown } from "../db/connection.js";
 import { formatFatalError } from "../utils/errors.js";
+import { SHUTDOWN_TIMEOUT_MS } from "../constants.js";
 import type { HttpConfig } from "../config.js";
 
 export async function runHttpTransport(server: McpServer, config: HttpConfig): Promise<void> {
@@ -28,12 +29,27 @@ export async function runHttpTransport(server: McpServer, config: HttpConfig): P
     void transport.handleRequest(req, res);
   });
 
-  const shutdown = async (signal: string) => {
-    console.error(`\nShutting down HTTP server (${signal})...`);
-    httpServer.close();
-    await transport.close();
-    await closePoolOnShutdown();
-    process.exit(0);
+  let shuttingDown = false;
+  // exitCode 0 for an orderly stop (signal), 1 for a crash. A crashed server
+  // must not report success to its supervisor, and a hung transport.close()
+  // or pool.close() must not keep it alive: the timer forces the exit.
+  const shutdown = async (reason: string, exitCode = 0) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.error(`\nShutting down HTTP server (${reason})...`);
+    setTimeout(() => {
+      console.error(`Shutdown timed out after ${SHUTDOWN_TIMEOUT_MS}ms; exiting.`);
+      process.exit(exitCode);
+    }, SHUTDOWN_TIMEOUT_MS).unref();
+    try {
+      httpServer.close();
+      await transport.close();
+      await closePoolOnShutdown();
+      console.error("Server stopped.");
+    } catch (err) {
+      console.error("Error during shutdown:", formatFatalError(err));
+    }
+    process.exit(exitCode);
   };
 
   process.on("SIGINT", () => shutdown("SIGINT"));
@@ -41,11 +57,11 @@ export async function runHttpTransport(server: McpServer, config: HttpConfig): P
   process.on("SIGUSR2", () => shutdown("SIGUSR2"));
   process.on("uncaughtException", (err) => {
     console.error("Uncaught exception:", formatFatalError(err));
-    shutdown("uncaughtException");
+    void shutdown("uncaughtException", 1);
   });
   process.on("unhandledRejection", (reason) => {
     console.error("Unhandled rejection:", formatFatalError(reason));
-    shutdown("unhandledRejection");
+    void shutdown("unhandledRejection", 1);
   });
 
   await server.connect(transport);
