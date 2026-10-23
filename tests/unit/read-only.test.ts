@@ -14,6 +14,7 @@ const accepted = [
   "SELECT 1 WHERE a = 'x; y /* z */ -- w'", "SELECT 1 WHERE a = 'it''s; fine'", "SELECT * FROM dbo.Sp_NotAProc_Table",
   "SELECT [a]]b], \"Weird Name\" FROM T WHERE x = 'it''s'",
   "SELECT IIF(1=1,'a','b')", "SELECT * FROM OPENJSON('[]')", "SELECT DATEADD(day,1,GETDATE())", "SELECT CASE WHEN 1=1 THEN 1 ELSE 0 END",
+  "SELECT x1 FROM dbo.T", "SELECT [1COMMIT] FROM dbo.T", "SELECT 1 AS commit1", "SELECT 1 AS tran1",
 ];
 const rejected: Array<[string, RegExp]> = [
   ["", /statement is empty/], ["   ", /statement is empty/],
@@ -50,6 +51,17 @@ const rejected: Array<[string, RegExp]> = [
   ["SAVE TRAN x", /must start with|forbidden keyword/],
   ["IF 1=1 SELECT 1", /must start with|forbidden keyword/],
   ["SELECT 1 SET ROWCOUNT 1", /forbidden keyword "SET"/],
+  ["SELECT 1COMMIT", /forbidden keyword "COMMIT"/],
+  ["SELECT 1ROLLBACK", /forbidden keyword "ROLLBACK"/],
+  ["SELECT 1DELETE dbo.T SELECT 1COMMIT", /forbidden keyword "DELETE"/],
+  ["SELECT 1INSERT dbo.T VALUES(1) SELECT 1COMMIT", /forbidden keyword "INSERT"/],
+  ["SELECT 1DROP TABLE dbo.T", /forbidden keyword "DROP"/],
+  ["SELECT 1TRUNCATE TABLE dbo.T", /forbidden keyword "TRUNCATE"/],
+  ["SELECT 1EXEC('DELETE dbo.T COMMIT')", /forbidden keyword "EXEC"/],
+  ["SELECT 1 WHERE 1=1DISABLE TRIGGER ALL ON DATABASE SELECT 1COMMIT", /forbidden keyword "DISABLE"/],
+  ["SELECT 1SET IMPLICIT_TRANSACTIONS ON", /forbidden keyword "SET"/],
+  ["SELECT 1.0COMMIT", /forbidden keyword "COMMIT"/],
+  ["SELECT 1e1COMMIT", /forbidden keyword "COMMIT"/],
 ];
 for (const s of accepted) test(`assertReadOnlyStatement accepts ${JSON.stringify(s)}`, () => assertReadOnlyStatement(s));
 for (const [s, re] of rejected) test(`assertReadOnlyStatement rejects ${JSON.stringify(s)}`, () => assert.throws(() => assertReadOnlyStatement(s), re));
@@ -62,6 +74,9 @@ const whereRejected: Array<[string, RegExp]> = [
   ["id = NEXT VALUE FOR dbo.Seq", /forbidden phrase/], ["a = 1 OR UPDATE", /forbidden keyword "UPDATE"/],
   ["1=1 [ ' ] ; DROP TABLE T; -- '", /single statement|unbalanced/],
   ["1=1 DISABLE TRIGGER ALL ON dbo.T COMMIT SELECT 1 FROM dbo.T WHERE 1=1", /forbidden keyword "DISABLE"/],
+  ["1=1COMMIT", /forbidden keyword "COMMIT"/],
+  ["1=1DELETE dbo.T SELECT 1COMMIT SELECT 1 FROM dbo.T WHERE 1=1", /forbidden keyword "DELETE"/],
+  ["1=1EXEC('DELETE dbo.T COMMIT') SELECT 1 FROM dbo.T WHERE 1=1", /forbidden keyword "EXEC"/],
 ];
 for (const s of whereAccepted) test(`assertSafeWhereClause accepts ${JSON.stringify(s)}`, () => assertSafeWhereClause(s));
 for (const [s, re] of whereRejected) test(`assertSafeWhereClause rejects ${JSON.stringify(s)}`, () => assert.throws(() => assertSafeWhereClause(s), re));

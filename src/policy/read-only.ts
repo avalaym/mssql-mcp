@@ -24,11 +24,13 @@ const UNMATCHED_DELIMITER = /['["]/;
 const COMMENT = /--|\/\*/;
 const TRAILING_SEMI = /;\s*$/;
 const FIRST_WORD = /^\s*(SELECT|WITH)\b/i;
-const NEXT_VALUE_FOR = /\bNEXT\s+VALUE\s+FOR\b/i;
+const NEXT_VALUE_FOR = /(?<![A-Za-z_@#$])NEXT\s+VALUE\s+FOR\b/i;
+// A digit counts as a boundary (leading lookbehind instead of \b) because the
+// T-SQL lexer ends a numeric literal at the first letter: SELECT 1COMMIT.
 // T-SQL does not require ';' between statements, so transaction control and
 // statement-leading verbs must be rejected as words too (SELECT 1 COMMIT).
 const FORBIDDEN_KEYWORDS = new RegExp(
-  "\\b(" +
+  "(?<![A-Za-z_@#$])(" +
     [
       "INSERT|UPDATE|DELETE|MERGE|INTO|TRUNCATE|DROP|CREATE|ALTER|EXEC|EXECUTE|GRANT|REVOKE|DENY",
       "BACKUP|RESTORE|DBCC|KILL|SHUTDOWN|RECONFIGURE|WAITFOR|OPENROWSET|OPENQUERY|OPENDATASOURCE|BULK",
@@ -40,7 +42,7 @@ const FORBIDDEN_KEYWORDS = new RegExp(
   "i",
 );
 // Not preceded by "." or a word character, so dbo.Sp_NotAProc_Table passes.
-const FORBIDDEN_PROC = /(?<![.\w])((?:xp|sp)_\w*)/i;
+const FORBIDDEN_PROC = /(?<![.A-Za-z_@#$])((?:xp|sp)_\w*)/i;
 
 function maskQuotedTokens(text: string): string {
   return text.replace(QUOTED_TOKEN, (token) => {
