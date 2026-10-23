@@ -73,7 +73,13 @@ export function getConnectionState(): ConnectionState {
   return {
     connected: pool?.connected ?? false,
     config: currentConfig
-      ? { server: currentConfig.server, database: currentConfig.database, port: currentConfig.port }
+      ? {
+          server: currentConfig.server,
+          database: currentConfig.database,
+          port: currentConfig.port,
+          auth_type: currentConfig.authType,
+          domain: currentConfig.domain,
+        }
       : null,
     pool_info: pool
       ? { size: pool.size, available: pool.available, pending: pool.pending, borrowed: pool.borrowed }
