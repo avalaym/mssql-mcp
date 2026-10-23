@@ -30,10 +30,14 @@
     "start:http": "cross-env MCP_TRANSPORT=http node dist/src/index.js",
     "clean": "rimraf dist",
     "prepublishOnly": "npm run clean && npm run build",
+    "lint": "eslint .",
+    "check:tests": "node scripts/check-test-manifest.mjs",
+    "check:version": "node scripts/check-version-sync.mjs",
+    "check": "npm run check:tests && npm run check:version",
     "typecheck": "tsc --noEmit",
     "test": "node --test dist/tests/unit/validators.test.js dist/tests/unit/query-builders.test.js dist/tests/unit/tool-contracts.test.js dist/tests/unit/markdown.test.js dist/tests/unit/errors.test.js dist/tests/unit/config.test.js dist/tests/unit/format.test.js",
     "test:integration": "node --test dist/tests/integration/*.test.js",
-    "ci": "npm run typecheck && npm run build && npm test"
+    "ci": "npm run lint && npm run check && npm run typecheck && npm run build && npm test"
   },
   "keywords": [
     "mcp",
@@ -56,11 +60,15 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@modelcontextprotocol/client": "2.0.0",
     "@types/mssql": "^12.3.0",
     "@types/node": "^22.0.0",
     "cross-env": "^7.0.3",
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0",
     "rimraf": "^5.0.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.0"
   }
 }

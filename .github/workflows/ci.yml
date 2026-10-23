@@ -5,23 +5,52 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
+
+# Only what the jobs need: read the repo. Nothing here writes back to GitHub.
+permissions:
+  contents: read
+
+# New pushes to the same PR cancel the previous in-flight run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  # Fast, DB-free gate: lint + repo invariants (every unit test wired into
+  # `npm test`, package.json version in sync with src/constants.ts).
+  lint:
+    name: Lint & checks
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Repo invariants (test manifest, version sync)
+        run: npm run check
+
+  # Typecheck + build + unit tests across supported Node versions.
+  # Unit tests run against compiled output, so a clean build is required first.
+  unit:
+    name: Build & unit tests (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         node-version: [20.x, 22.x, 24.x]
-
-    services:
-      sqlserver:
-        image: mcr.microsoft.com/mssql/server:2022-latest
-        env:
-          ACCEPT_EULA: Y
-          MSSQL_SA_PASSWORD: ${{ secrets.CI_SQL_SA_PASSWORD || 'P@ssw0rd_CI_2024!' }}
-        ports:
-          - 1433:1433
-
     steps:
       - uses: actions/checkout@v4
 
@@ -40,10 +69,45 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test
+      - name: Unit tests
         run: npm test
 
-      - name: Integration test (live SQL Server)
+      - name: Verify package contents
+        run: npm pack --dry-run
+
+  # End-to-end MCP client -> server -> live SQL Server. Runs once on the
+  # current LTS; the unit matrix already covers Node-version compatibility.
+  integration:
+    name: Integration tests (SQL Server 2022)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [lint, unit]
+
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: ${{ secrets.CI_SQL_SA_PASSWORD || 'P@ssw0rd_CI_2024!' }}
+        ports:
+          - 1433:1433
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Integration tests (live SQL Server)
         run: npm run test:integration
         env:
           DB_SERVER: localhost
@@ -53,5 +117,20 @@ jobs:
           DB_ENCRYPT: "true"
           DB_TRUST_SERVER_CERTIFICATE: "true"
 
-      - name: Verify package
-        run: npm pack --dry-run
+  # Single required status check for branch protection: goes red if any job
+  # above failed, was cancelled, or was skipped.
+  ci-ok:
+    name: CI passed
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [lint, unit, integration]
+    steps:
+      - name: Check job results
+        run: |
+          echo "lint=${{ needs.lint.result }} unit=${{ needs.unit.result }} integration=${{ needs.integration.result }}"
+          if [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.unit.result }}" != "success" ] || \
+             [ "${{ needs.integration.result }}" != "success" ]; then
+            echo "::error::One or more CI jobs did not succeed."
+            exit 1
+          fi

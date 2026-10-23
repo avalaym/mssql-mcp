@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [3.0.0] - Unreleased
 
+### Added
+
+- ESLint (`eslint` + `typescript-eslint`, flat config) with `npm run lint`, plus
+  `npm run check` guards that fail when a `tests/unit/*.test.ts` file is not
+  wired into `npm test` or when `package.json` and `SERVER_VERSION` diverge.
+- CI workflow split into `lint`, `unit` (Node 20/22/24), `integration`
+  (SQL Server 2022) and a single `CI passed` status job for branch protection;
+  runs with read-only token permissions, per-PR concurrency cancellation and
+  job timeouts.
+
 ### Changed
 
 - Migrated from `@modelcontextprotocol/sdk` (v1) to the **MCP TypeScript SDK v2**
