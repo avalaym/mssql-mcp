@@ -228,7 +228,7 @@ Read-only mode is **on by default**. It is defense in depth, not a guarantee: it
 **What it does**
 
 - `mssql_run_sql_query` accepts a single `SELECT` or `WITH` statement only. Comments (`--`, `/* */`) and `;` (other than a trailing one) are rejected.
-- Statements containing write, DDL, execution or administration keywords are rejected: `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `INTO`, `TRUNCATE`, `DROP`, `CREATE`, `ALTER`, `EXEC`, `EXECUTE`, `GRANT`, `REVOKE`, `DENY`, `BACKUP`, `RESTORE`, `DBCC`, `KILL`, `SHUTDOWN`, `RECONFIGURE`, `WAITFOR`, `OPENROWSET`, `OPENQUERY`, `OPENDATASOURCE`, `BULK`, any `xp_`/`sp_` procedure name, and the phrase `NEXT VALUE FOR`.
+- Statements containing write, DDL, execution or administration keywords are rejected: `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `INTO`, `TRUNCATE`, `DROP`, `CREATE`, `ALTER`, `EXEC`, `EXECUTE`, `GRANT`, `REVOKE`, `DENY`, `BACKUP`, `RESTORE`, `DBCC`, `KILL`, `SHUTDOWN`, `RECONFIGURE`, `WAITFOR`, `OPENROWSET`, `OPENQUERY`, `OPENDATASOURCE`, `BULK`, `xp_`/`sp_` procedure names that are not schema-qualified (`EXEC` itself is also rejected), and the phrase `NEXT VALUE FOR`.
 - Unbalanced quotes or brackets are rejected (the filter fails closed when it cannot tell what is a literal).
 - Every query, including `mssql_read_table_rows`, runs inside a transaction that is always rolled back, with a lock timeout.
 - `whereClause` in `mssql_read_table_rows` goes through the same filter in every mode, including when read-only mode is off.
