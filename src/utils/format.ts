@@ -110,15 +110,29 @@ const MAX_NORMALIZE_DEPTH = 50;
 const MAX_DEPTH_PLACEHOLDER = "[max depth exceeded]";
 const CIRCULAR_PLACEHOLDER = "[circular reference]";
 
+// A recordset row is subject to the same depth and circular-reference guard
+// as any other object (see normalizeOutput); the only difference is that its
+// fields are normalized with the column metadata of the recordset.
 function normalizeRecordRow(
   row: Record<string, unknown>,
   columns: ColumnMetadata,
   seen: Set<unknown>,
   depth: number
-): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(row).map(([key, value]) => [key, normalizeOutput(value, columns[key], seen, depth)])
-  );
+): unknown {
+  if (depth >= MAX_NORMALIZE_DEPTH) {
+    return MAX_DEPTH_PLACEHOLDER;
+  }
+  if (seen.has(row)) {
+    return CIRCULAR_PLACEHOLDER;
+  }
+  seen.add(row);
+  try {
+    return Object.fromEntries(
+      Object.entries(row).map(([key, value]) => [key, normalizeOutput(value, columns[key], seen, depth + 1)])
+    );
+  } finally {
+    seen.delete(row);
+  }
 }
 
 export function formatJson(data: unknown): string {

@@ -181,3 +181,26 @@ test("normalizeOutput - same object appearing twice (not a cycle) is normalized 
   assert.deepEqual(result.a, { id: 1 });
   assert.deepEqual(result.b, { id: 1 });
 });
+
+test("normalizeOutput - recordset row that references itself yields the circular placeholder directly", () => {
+  const row: Record<string, unknown> = { id: 1 };
+  row.self = row;
+  const recordset = Object.assign([row], { columns: { id: { type: "int" } } });
+  const result = normalizeOutput(recordset) as Array<Record<string, unknown>>;
+  assert.equal(result[0].id, 1);
+  assert.equal(result[0].self, "[circular reference]");
+});
+
+test("normalizeOutput - recordset rows get the same depth budget as plain objects", () => {
+  const build = (asRecordset: boolean) => {
+    let leaf: Record<string, unknown> = { value: "leaf" };
+    for (let i = 0; i < 48; i++) leaf = { nested: leaf };
+    const row = { payload: leaf };
+    return asRecordset ? Object.assign([row], { columns: { payload: { type: "nvarchar" } } }) : [row];
+  };
+  const viaRecordset = JSON.stringify(normalizeOutput(build(true)));
+  const viaPlain = JSON.stringify(normalizeOutput(build(false)));
+  assert.equal(viaRecordset, viaPlain);
+  assert.ok(viaPlain.includes("max depth exceeded"));
+  assert.ok(!viaPlain.includes("leaf"));
+});

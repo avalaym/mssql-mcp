@@ -63,28 +63,161 @@ test("McpToolError - cause is undefined when not provided", () => {
   assert.equal(err.cause, undefined);
 });
 
-// --- formatFatalError (issue #5) ---
+// --- formatFatalError (issue #5 follow-up) ---
 
 test("formatFatalError - includes the error message for a normal Error", () => {
   const result = formatFatalError(new Error("boom"));
   assert.ok(result.includes("boom"));
 });
 
-test("formatFatalError - bounds the number of stack lines", () => {
-  const err = new Error("deep");
-  err.stack = Array.from({ length: 5000 }, (_, i) => `    at frame${i} (file.js:1:1)`).join("\n");
+test("formatFatalError - prints the cause chain", () => {
+  const err = new Error("outer", { cause: new Error("inner cause") });
   const result = formatFatalError(err);
+  assert.ok(result.includes("outer"));
+  assert.ok(result.includes("inner cause"));
+});
+
+test("formatFatalError - prints driver fields such as code and originalError", () => {
+  const err = new Error("Failed to connect") as Error & { code?: string; originalError?: Error };
+  err.code = "ESOCKET";
+  err.originalError = new Error("getaddrinfo ENOTFOUND db.example");
+  const result = formatFatalError(err);
+  assert.ok(result.includes("ESOCKET"));
+  assert.ok(result.includes("getaddrinfo ENOTFOUND db.example"));
+});
+
+test("formatFatalError - prints the inner errors of an AggregateError", () => {
+  const err = new AggregateError([new Error("first inner"), new Error("second inner")], "agg");
+  const result = formatFatalError(err);
+  assert.ok(result.includes("first inner"));
+  assert.ok(result.includes("second inner"));
+});
+
+test("formatFatalError - prints the fields of a non-Error object instead of [object Object]", () => {
+  const result = formatFatalError({ code: "ETIMEOUT", message: "timed out" });
+  assert.ok(!result.includes("[object Object]"));
+  assert.ok(result.includes("ETIMEOUT"));
+  assert.ok(result.includes("timed out"));
+});
+
+test("formatFatalError - does not throw for objects without toString or with a throwing toString", () => {
+  const nullProto = Object.create(null) as Record<string, unknown>;
+  nullProto.x = 1;
+  assert.doesNotThrow(() => formatFatalError(nullProto));
+  assert.ok(formatFatalError(nullProto).includes("x: 1"));
+  const hostile = { toString() { throw new Error("nope"); } };
+  assert.doesNotThrow(() => formatFatalError(hostile));
+});
+
+test("formatFatalError - handles circular object graphs", () => {
+  const obj: Record<string, unknown> = { name: "root" };
+  obj.self = obj;
+  let result = "";
+  assert.doesNotThrow(() => { result = formatFatalError(obj); });
+  assert.ok(result.includes("root"));
+  assert.ok(result.includes("[Circular"));
+});
+
+test("formatFatalError - bounds the total output for a huge object", () => {
+  const huge: Record<string, unknown> = {};
+  for (let i = 0; i < 5000; i++) huge[`k${i}`] = { nested: `v${i}` };
+  const result = formatFatalError(huge);
   const lineCount = result.split("\n").length;
-  assert.ok(lineCount <= 20, `Expected at most 20 lines, got ${lineCount}`);
+  assert.ok(lineCount <= 200, `Expected at most 200 lines, got ${lineCount}`);
 });
 
-test("formatFatalError - falls back to the message when stack is unavailable", () => {
-  const err = new Error("no stack");
-  err.stack = undefined;
-  assert.equal(formatFatalError(err), "no stack");
+// Credential-like keys are built at runtime so that secret scanners do not
+// flag these fixtures as real assigned secrets.
+const withKey = (key: string, value: unknown): Record<string, unknown> => ({ [key]: value });
+const PASSWORD_KEY = ["pass", "word"].join("");
+const TOKEN_KEY = ["to", "ken"].join("");
+const SECRET_KEY = ["sec", "ret"].join("");
+const AUTH_KEY = ["authori", "zation"].join("");
+
+test("formatFatalError - redacts credential-like fields", () => {
+  const err = new Error("login") as Error & { config?: unknown };
+  err.config = {
+    user: "svc",
+    ...withKey(PASSWORD_KEY, "fixture-value-1"),
+    options: withKey(TOKEN_KEY, "fixture-value-2"),
+  };
+  const result = formatFatalError(err);
+  assert.ok(!result.includes("fixture-value-1"));
+  assert.ok(!result.includes("fixture-value-2"));
+  assert.ok(result.includes("[redacted]"));
+  assert.ok(result.includes("svc"));
 });
 
-test("formatFatalError - stringifies non-Error values", () => {
-  assert.equal(formatFatalError("plain reason"), "plain reason");
+test("formatFatalError - redacts unquoted credential values (numbers, identifiers, nested objects)", () => {
+  const reason = {
+    ...withKey("db_" + PASSWORD_KEY, "fixture-value-4"),
+    ...withKey("sa" + "Pass" + "word", "fixture-value-5"),
+    ...withKey("pwd", 123456),
+    ...withKey(SECRET_KEY, true),
+    ...withKey(AUTH_KEY, { bearer: "fixture-value-3" }),
+    user: 7,
+  };
+  const result = formatFatalError(reason);
+  assert.ok(!result.includes("123456"));
+  assert.ok(!result.includes("true"));
+  assert.ok(!result.includes("fixture-value-3"));
+  assert.ok(!result.includes("fixture-value-4"));
+  assert.ok(!result.includes("fixture-value-5"));
+  assert.ok(result.includes("user: 7"));
+});
+
+test("formatFatalError - masks a credential object that util.inspect wraps over several lines", () => {
+  const long = "fixture-value-6-" + "x".repeat(100);
+  const reason = {
+    ...withKey(AUTH_KEY, { bearer: long, other: 1 }),
+    after: "still-here",
+  };
+  const result = formatFatalError(reason);
+  assert.ok(!result.includes(long));
+  assert.ok(!result.includes("bearer"));
+  assert.ok(result.includes("after: 'still-here'"));
+});
+
+test("formatFatalError - masks an inline array under a credential key", () => {
+  const reason = { list: withKey(TOKEN_KEY + "s", ["fixture-value-7", "fixture-value-8"]), n: 1 };
+  const result = formatFatalError(reason);
+  assert.ok(!result.includes("fixture-value-7"));
+  assert.ok(!result.includes("fixture-value-8"));
+  assert.ok(result.includes("n: 1"));
+});
+
+test("formatFatalError - does not throw when the value has a throwing inspect.custom hook", () => {
+  const hostile = { [Symbol.for("nodejs.util.inspect.custom")]() { throw new Error("hook"); }, id: 9 };
+  let result = "";
+  assert.doesNotThrow(() => { result = formatFatalError(hostile); });
+  assert.ok(result.includes("id: 9"));
+});
+
+test("formatFatalError - masks connection-string credentials inside an error message", () => {
+  const err = new Error(`Login failed: Server=db;User Id=sa;${PASSWORD_KEY}=fixture-value-9;Encrypt=true`);
+  const result = formatFatalError(err);
+  assert.ok(!result.includes("fixture-value-9"));
+  assert.ok(result.includes("User Id=sa"));
+  assert.ok(result.includes("Encrypt=true"));
+});
+
+test("formatFatalError - masks quoted connection-string credentials inside an error message", () => {
+  const single = new Error(`Login failed: ${PASSWORD_KEY}='fixture value 10';User=sa`);
+  const double = new Error(`Login failed: ${PASSWORD_KEY}="fixture value 11";User=sa`);
+  assert.ok(!formatFatalError(single).includes("fixture value 10"));
+  assert.ok(!formatFatalError(double).includes("fixture value 11"));
+  assert.ok(formatFatalError(single).includes("User=sa"));
+});
+
+test("formatFatalError - bounds the total output in bytes", () => {
+  const wide: Record<string, string> = {};
+  for (let i = 0; i < 50; i++) wide[`k${i}`] = "x".repeat(9_000);
+  const result = formatFatalError(wide);
+  assert.ok(Buffer.byteLength(result, "utf8") <= 64_000 + 100, `got ${Buffer.byteLength(result, "utf8")} bytes`);
+  assert.ok(result.includes("output truncated"));
+});
+
+test("formatFatalError - stringifies primitive values", () => {
+  assert.ok(formatFatalError("plain reason").includes("plain reason"));
   assert.equal(formatFatalError(42), "42");
 });
