@@ -193,6 +193,22 @@ test("formatFatalError - does not throw when the value has a throwing inspect.cu
   assert.ok(result.includes("id: 9"));
 });
 
+test("formatFatalError - masks connection-string credentials inside an error message", () => {
+  const err = new Error(`Login failed: Server=db;User Id=sa;${PASSWORD_KEY}=fixture-value-9;Encrypt=true`);
+  const result = formatFatalError(err);
+  assert.ok(!result.includes("fixture-value-9"));
+  assert.ok(result.includes("User Id=sa"));
+  assert.ok(result.includes("Encrypt=true"));
+});
+
+test("formatFatalError - bounds the total output in bytes", () => {
+  const wide: Record<string, string> = {};
+  for (let i = 0; i < 50; i++) wide[`k${i}`] = "x".repeat(9_000);
+  const result = formatFatalError(wide);
+  assert.ok(Buffer.byteLength(result, "utf8") <= 64_000 + 100, `got ${Buffer.byteLength(result, "utf8")} bytes`);
+  assert.ok(result.includes("output truncated"));
+});
+
 test("formatFatalError - stringifies primitive values", () => {
   assert.ok(formatFatalError("plain reason").includes("plain reason"));
   assert.equal(formatFatalError(42), "42");

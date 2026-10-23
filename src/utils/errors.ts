@@ -26,6 +26,9 @@ export function toActionableError(error: unknown): string {
 // See https://github.com/BYMCS/mssql-mcp/issues/5.
 const FATAL_INSPECT_DEPTH = 4;
 const FATAL_MAX_LINES = 200;
+// util.inspect caps each string at 10 000 chars by default, so a line cap
+// alone does not bound the write; the byte cap does.
+const FATAL_MAX_BYTES = 64_000;
 // Defence in depth: the drivers in use attach only code/cause/originalError to
 // their errors, but an arbitrary application error may carry a config object.
 // Masks the value of any key that contains a credential-like word
@@ -54,10 +57,15 @@ const REDACT_INLINE_PATTERN = new RegExp(
   "gi"
 );
 
+// Connection-string form inside a message or stack: `Password=...;`,
+// `pwd=...`, `token=...` (terminated by `;`, whitespace, a quote or end).
+const REDACT_ASSIGNMENT_PATTERN = new RegExp(String.raw`\b(${REDACT_KEY}\s*=\s*)[^;\s'"\x60]+`, "gi");
+
 function redactCredentials(text: string): string {
   return text
     .replace(REDACT_BLOCK_PATTERN, "$1$2[redacted]")
-    .replace(REDACT_INLINE_PATTERN, "$1[redacted]");
+    .replace(REDACT_INLINE_PATTERN, "$1[redacted]")
+    .replace(REDACT_ASSIGNMENT_PATTERN, "$1[redacted]");
 }
 
 export function formatFatalError(error: unknown): string {
@@ -71,9 +79,14 @@ export function formatFatalError(error: unknown): string {
   }
   const redacted = redactCredentials(inspected);
   const lines = redacted.split("\n");
-  if (lines.length <= FATAL_MAX_LINES) return redacted;
-  const kept = lines.slice(0, FATAL_MAX_LINES - 1);
-  return `${kept.join("\n")}\n... (${lines.length - kept.length} more lines truncated)`;
+  let kept = lines.length <= FATAL_MAX_LINES ? lines : lines.slice(0, FATAL_MAX_LINES - 1);
+  let text = kept.join("\n");
+  if (Buffer.byteLength(text, "utf8") > FATAL_MAX_BYTES) {
+    text = Buffer.from(text, "utf8").subarray(0, FATAL_MAX_BYTES).toString("utf8");
+    kept = text.split("\n");
+  }
+  if (kept.length === lines.length && text.length === redacted.length) return text;
+  return `${text}\n... (output truncated: ${lines.length - kept.length} more lines)`;
 }
 
 export function toolError(message: string) {
