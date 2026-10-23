@@ -7,13 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- NTLM authentication (`DB_AUTH_TYPE=ntlm`, `DB_DOMAIN`).
+- Read-only mode on by default (`MSSQL_MCP_READ_ONLY`), described as defense in
+  depth: the connected principal's permissions remain the real boundary.
+- `mssql_connection_status` and `mssql_connect_database` report the session
+  login, auth scheme and principal write-privilege hints.
+
 ### Changed
 
+- `.env` is loaded only with `MSSQL_MCP_DOTENV=1`.
+- `whereClause` in `mssql_read_table_rows` is validated in every mode and the
+  read always runs in a rolled-back transaction.
+- In read-only mode the stored-procedure tools and the deprecated aliases are
+  not registered.
 - Repository metadata and docs now point at this fork only: `package.json`
   `author`/`bugs` (issues are disabled here, so `bugs` is the repository URL;
   the original authors are credited under `contributors`), `SECURITY.md`
   supported versions (3.x) and private-reporting channel. Historical links to
   upstream issues are kept but labelled as upstream.
+
+### Fixed
+
+- `readOnlyHint: true` on `mssql_read_table_rows` is now accurate.
 
 ## [3.0.0] - 2026-10-23
 

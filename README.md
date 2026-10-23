@@ -129,16 +129,16 @@ To upgrade, install the new release the same way; to remove,
 | `mssql_connect_database` | No | Connect using env variables. Idempotent. |
 | `mssql_disconnect_database` | No | Close connection. Idempotent. |
 | `mssql_connection_status` | ✅ | Connection state and pool metrics |
-| `mssql_run_sql_query` | ⚠️ No | Execute arbitrary SQL. **May mutate data.** |
+| `mssql_run_sql_query` | ⚠️ No | Execute SQL. In read-only mode (default) only a single `SELECT`/`WITH`; with the mode off, arbitrary SQL that **may mutate data**. |
 | `mssql_list_schema_objects` | ✅ | List tables/views/procedures/functions with pagination |
 | `mssql_describe_table_columns` | ✅ | Column definitions for a table |
 | `mssql_read_table_rows` | ✅ | Paginated rows with projection and safe WHERE |
-| `mssql_execute_stored_procedure` | ⚠️ No | Execute a stored procedure |
+| `mssql_execute_stored_procedure` | ⚠️ No | Execute a stored procedure (not registered in read-only mode) |
 | `mssql_list_databases` | ✅ | List all databases on the instance |
 
 All data tools accept a `response_format` parameter (`"json"` | `"markdown"`, default `"json"`). Use `"markdown"` to get human-readable table output.
 
-### Deprecated aliases (still registered for backward compatibility)
+### Deprecated aliases (registered for backward compatibility only when read-only mode is off)
 
 These are the only alias tool names the server actually registers (in `src/tools/*.ts`).
 They behave the same as their replacement but are not documented in new integrations —
@@ -180,11 +180,22 @@ MCP_TRANSPORT=http MCP_HOST=0.0.0.0 MCP_PORT=8080 node dist/src/index.js
 | `DB_DATABASE` | ❌ | — | Database name |
 | `DB_USER` | ❌ | — | Login username |
 | `DB_PASSWORD` | ❌ | — | Login password |
+| `DB_AUTH_TYPE` | ❌ | `sql` | `sql` or `ntlm` (see NTLM authentication below) |
+| `DB_DOMAIN` | With `ntlm` | — | Windows/AD domain; required when `DB_AUTH_TYPE=ntlm` |
 | `DB_PORT` | ❌ | 1433 | TCP port |
 | `DB_ENCRYPT` | ❌ | true | Enable TLS (required for Azure SQL) |
 | `DB_TRUST_SERVER_CERTIFICATE` | ❌ | false | Trust self-signed certs |
 | `DB_CONNECTION_TIMEOUT` | ❌ | 30000 | Connection timeout ms |
 | `DB_REQUEST_TIMEOUT` | ❌ | 30000 | Query timeout ms |
+
+### Server behaviour
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MSSQL_MCP_READ_ONLY` | `true` | Read-only mode (see Read-only mode below). Only `false` or `0` turn it off |
+| `MSSQL_MCP_DOTENV` | unset | Set to `1` in the process environment to load a `.env` file |
+
+> **Behaviour change:** the server no longer loads `.env` automatically. The file is loaded only when `MSSQL_MCP_DOTENV=1` is set in the process environment (not inside the `.env` itself). Without it, only the environment your IDE or shell passes is used.
 
 ### Transport
 
@@ -201,13 +212,59 @@ MCP_TRANSPORT=http MCP_HOST=0.0.0.0 MCP_PORT=8080 node dist/src/index.js
 - **Parameterized queries**: All user-supplied values (WHERE clause values, column values) must be passed as named parameters via `@paramName` — never embedded in query strings.
 - **Origin and Host validation**: HTTP transport validates both the `Origin` and `Host` headers against an allowlist (localhost, `[::1]`, and the configured bind host by default), guarding against DNS rebinding.
 - **SQL risk labeling**: `run_sql_query` and `execute_stored_procedure` are explicitly labeled as non-read-only and open-world.
+- **Read-only mode on by default**: see the next section. It reduces risk but is not a substitute for a read-only account.
 
 ### ⚠️ SQL Risk Notes
 
-`run_sql_query` accepts arbitrary SQL including DDL and DML. To minimize risk:
+With read-only mode off, `run_sql_query` accepts arbitrary SQL including DDL and DML. To minimize risk:
 - Use a least-privilege SQL login (SELECT-only where possible)
 - Never run the server with a `sysadmin` or `sa` account
 - Consider network firewall rules to limit what the server can reach
+
+## 🛡️ Read-only mode
+
+Read-only mode is **on by default**. It is defense in depth, not a guarantee: it is a text-level filter plus a transaction that is always rolled back, and it is not a SQL parser. **The permissions of the account the server connects with are the real boundary.**
+
+**What it does**
+
+- `mssql_run_sql_query` accepts a single `SELECT` or `WITH` statement only. Comments (`--`, `/* */`) and `;` (other than a trailing one) are rejected.
+- Statements containing write, DDL, execution or administration keywords are rejected: `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `INTO`, `TRUNCATE`, `DROP`, `CREATE`, `ALTER`, `EXEC`, `EXECUTE`, `GRANT`, `REVOKE`, `DENY`, `BACKUP`, `RESTORE`, `DBCC`, `KILL`, `SHUTDOWN`, `RECONFIGURE`, `WAITFOR`, `OPENROWSET`, `OPENQUERY`, `OPENDATASOURCE`, `BULK`, any `xp_`/`sp_` procedure name, and the phrase `NEXT VALUE FOR`.
+- Unbalanced quotes or brackets are rejected (the filter fails closed when it cannot tell what is a literal).
+- Every query, including `mssql_read_table_rows`, runs inside a transaction that is always rolled back, with a lock timeout.
+- `whereClause` in `mssql_read_table_rows` goes through the same filter in every mode, including when read-only mode is off.
+- The stored-procedure tool and the five deprecated aliases are not registered.
+
+**What it cannot undo**
+
+- Side effects that are not rolled back with a transaction. Sequence consumption is one example: `NEXT VALUE FOR` is blocked by phrase, but the family of such effects cannot be enumerated.
+- User-defined functions with side effects invoked from a `SELECT`.
+- Anything reachable from a read that acts outside the database: `xp_cmdshell`, Database Mail and linked servers, if the account is allowed to use them.
+
+**Check the principal.** `mssql_connect_database` and `mssql_connection_status` report `read_only`, `session.login_name`, `session.auth_scheme` and `session.principal` (`is_sysadmin`, `is_db_owner`, `is_db_datawriter`, `has_insert`, `has_update`, `has_delete`, `has_alter`, `can_write`). When read-only mode is on and the principal can write, a warning is included. `can_write` is a hint, not an audit: it uses database-level checks only. Per-table grants and custom roles are not detected, so `false` means "no write permission found in the places checked", not "cannot write".
+
+**The real control is a read-only account.** Connect with a login that has only `SELECT` (for example membership in `db_datareader` and nothing else) and no access to `xp_cmdshell`, Database Mail or linked servers.
+
+**Turning it off.** Set `MSSQL_MCP_READ_ONLY=false` (or `0`); any other value, or leaving it unset, keeps the mode on. Turning it off registers the stored-procedure tool and the deprecated aliases again, and `mssql_run_sql_query` accepts arbitrary SQL.
+
+## 🔑 NTLM authentication
+
+Set `DB_AUTH_TYPE=ntlm` to log in with a Windows/Active Directory account:
+
+```bash
+DB_AUTH_TYPE=ntlm
+DB_DOMAIN=EXAMPLE
+DB_USER=analyst
+DB_PASSWORD=...
+DB_SERVER=localhost
+```
+
+- `DB_USER` must be the bare account name (`analyst`, not `EXAMPLE\analyst` or `analyst@example`); the domain goes in `DB_DOMAIN`.
+- NTLM is implemented by the `tedious` driver in pure JavaScript. It does not use a Windows session, SSPI or Kerberos, so it works from Linux and WSL.
+- CI does not exercise NTLM against a server. To verify it locally against your own server:
+
+```bash
+DB_AUTH_TYPE=ntlm DB_DOMAIN=... DB_USER=... DB_PASSWORD=... DB_SERVER=... npm run test:integration
+```
 
 ## 📄 Pagination
 
@@ -237,8 +294,11 @@ src/
   constants.ts      ← limits, defaults, protocol strings
   config.ts         ← env parsing
   types.ts          ← shared TypeScript interfaces
+  policy/
+    read-only.ts    ← read-only mode filter and always-rolled-back transactions
   db/
     connection.ts   ← connection pool singleton
+    session.ts      ← session identity and principal write-privilege hints
     validators.ts   ← SQL identifier validation
     query-builders.ts ← safe parameterized query construction
   tools/            ← one file per tool group
@@ -267,7 +327,7 @@ Expected:
 
 ```bash
 npm install
-cp .env.example .env  # fill in your test DB credentials
+cp .env.example .env  # fill in your test DB credentials; loaded only with MSSQL_MCP_DOTENV=1
 npm run typecheck     # type check only
 npm run build         # compile TypeScript
 npm test              # run unit tests
