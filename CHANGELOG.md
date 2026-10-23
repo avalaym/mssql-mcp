@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_Nothing yet._
+### Changed
+
+- Repository metadata and docs now point at this fork only: `package.json`
+  `author`/`bugs` (issues are disabled here, so `bugs` is the repository URL;
+  the original authors are credited under `contributors`), `SECURITY.md`
+  supported versions (3.x) and private-reporting channel. Historical links to
+  upstream issues are kept but labelled as upstream.
 
 ## [3.0.0] - 2026-10-23
 
@@ -55,7 +61,7 @@ _Nothing yet._
   bounds its recursion depth (50 levels) and detects circular references
   instead of recursing without limit, which could previously overflow the
   call stack. Recordset rows go through the same guard as any other object.
-  Reported in [#5](https://github.com/BYMCS/mssql-mcp/issues/5).
+  Reported upstream in [BYMCS/mssql-mcp#5](https://github.com/BYMCS/mssql-mcp/issues/5).
 - The `uncaughtException`/`unhandledRejection` handlers in both transports
   now log the full error via `util.inspect` (`cause` chain, Node `code`/
   `errno`/`syscall`, driver `number`/`lineNumber`/`originalError`,

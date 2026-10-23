@@ -43,7 +43,7 @@ export async function runStdioTransport(server: McpServer): Promise<void> {
   // stdin; the server is expected to exit when stdin reaches EOF. Windows does
   // not reliably deliver OS signals to child processes when the parent exits,
   // so we must also react to stdin EOF and transport close, otherwise orphaned
-  // node processes accumulate. See https://github.com/BYMCS/mssql-mcp/issues/2
+  // node processes accumulate. See upstream issue https://github.com/BYMCS/mssql-mcp/issues/2
   transport.onclose = () => shutdown("stdio-close");
   process.stdin.on("end", () => shutdown("stdin-end"));
   process.stdin.on("close", () => shutdown("stdin-close"));
