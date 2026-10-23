@@ -93,15 +93,15 @@ test("(g) fn fails + rollback fails + invalidate fails -> fn error wins", async 
   const h = harness({ rollback: new Error("boom"), invalidate: new Error("close failed") });
   await assert.rejects(runReadOnly(h.pool, async () => { throw new Error("syntax"); }, h.deps), /^Error: syntax$/);
 });
-test("(h) fn fails + rollback EABORT -> fn error, no invalidate", async () => {
+test("(h) fn fails + rollback EABORT -> fn error, invalidates once", async () => {
   const h = harness({ rollback: abort });
   await assert.rejects(runReadOnly(h.pool, async () => { throw new Error("syntax"); }, h.deps), /^Error: syntax$/);
-  assert.ok(!h.log.includes("invalidate"));
+  assert.equal(h.log.filter((l) => l === "invalidate").length, 1);
 });
-test("(i) success + rollback EABORT -> rejects (fail closed), no invalidate", async () => {
+test("(i) success + rollback EABORT -> rejects (fail closed), invalidates once", async () => {
   const h = harness({ rollback: abort });
   await assert.rejects(runReadOnly(h.pool, async () => 7, h.deps), /aborted during the query/);
-  assert.ok(!h.log.includes("invalidate"));
+  assert.equal(h.log.filter((l) => l === "invalidate").length, 1);
 });
 for (const [name, afterRow] of [
   ["(j) transaction id changed", { id: "2", n: 1 }],
@@ -119,8 +119,18 @@ test("(m) LOCK_TIMEOUT reset fails -> cleanup failed, invalidates", async () => 
   await assert.rejects(runReadOnly(h.pool, async () => 1, h.deps), /cleanup failed \(reset boom\); connection discarded/);
   assert.equal(h.log.filter((l) => l === "invalidate").length, 1);
 });
-test("(n) fn fails and the post-fn boundary query fails -> fn error, no invalidate", async () => {
+test("(n) fn fails and the post-fn boundary query fails -> fn error, invalidates once", async () => {
   const h = harness({ afterQueryFails: new Error("post boom") });
   await assert.rejects(runReadOnly(h.pool, async () => { throw new Error("syntax"); }, h.deps), /^Error: syntax$/);
-  assert.ok(!h.log.includes("invalidate"));
+  assert.equal(h.log.filter((l) => l === "invalidate").length, 1);
+});
+test("(p) fn fails + boundary breached + rollback ok -> fn error, invalidates once", async () => {
+  const h = harness({ afterRow: { id: "1", n: 2 } });
+  await assert.rejects(runReadOnly(h.pool, async () => { throw new Error("syntax"); }, h.deps), /^Error: syntax$/);
+  assert.equal(h.log.filter((l) => l === "invalidate").length, 1);
+});
+test("(q) post boundary query fails -> the LOCK_TIMEOUT reset still runs", async () => {
+  const h = harness({ afterQueryFails: new Error("post boom") });
+  await assert.rejects(runReadOnly(h.pool, async () => 1, h.deps), /cleanup failed \(post boom\)/);
+  assert.ok(h.log.includes("batch:SET LOCK_TIMEOUT -1"));
 });

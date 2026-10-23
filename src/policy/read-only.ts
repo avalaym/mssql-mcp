@@ -167,26 +167,46 @@ export async function runReadOnly<T>(
     fnError = e;
   }
 
-  // Post-fn checks run even when fn failed, but a failure here never masks fnError.
+  // Post-fn checks run even when fn failed, but a failure here never masks
+  // fnError. The boundary query and the LOCK_TIMEOUT reset use separate try
+  // blocks so one failing cannot skip the other; the first error wins.
+  const post = d.createRequest(tx);
   try {
-    const post = d.createRequest(tx);
     after = boundary(await post.query(BOUNDARY_SQL));
-    await post.batch("SET LOCK_TIMEOUT -1");
   } catch (e) {
     cleanupFailed = true;
     cleanupError = e;
   }
+  try {
+    await post.batch("SET LOCK_TIMEOUT -1");
+  } catch (e) {
+    if (!cleanupFailed) cleanupError = e;
+    cleanupFailed = true;
+  }
 
-  const breached = !fnFailed && before !== undefined && after !== undefined && (after.id !== before.id || after.n !== 1);
+  const breached = before !== undefined && after !== undefined && (after.id !== before.id || after.n !== 1);
+
+  const discard = async (reason: string, detail: string): Promise<void> => {
+    console.error(reason, detail);
+    try {
+      await d.invalidatePool();
+    } catch (invalidateError) {
+      console.error("pool invalidation failed:", msg(invalidateError));
+    }
+  };
 
   try {
     await tx.rollback();
   } catch (rollbackError) {
     if (errorCode(rollbackError) === "EABORT") {
+      // mssql has already released the connection to the pool, with whatever
+      // session state the query left behind (LOCK_TIMEOUT, smuggled SET).
+      await discard("read-only transaction aborted:", msg(rollbackError));
       if (fnFailed) throw fnError;
-      throw new Error("Read-only transaction was aborted during the query; result discarded. Reconnect is not required.", {
-        cause: rollbackError,
-      });
+      throw new Error(
+        "Read-only transaction was aborted during the query; result discarded. Connection discarded; reconnect with mssql_connect_database.",
+        { cause: rollbackError },
+      );
     }
     console.error("read-only rollback failed:", msg(rollbackError));
     let cleanupNote = "connection discarded";
@@ -203,20 +223,17 @@ export async function runReadOnly<T>(
     );
   }
 
-  if (fnFailed) throw fnError;
   if (breached || cleanupFailed) {
-    console.error(
+    await discard(
       breached ? "read-only transaction boundary breached" : "read-only cleanup failed:",
       breached ? "" : msg(cleanupError),
     );
-    try {
-      await d.invalidatePool();
-    } catch (invalidateError) {
-      console.error("pool invalidation failed:", msg(invalidateError));
-    }
-    if (breached) {
-      throw new Error("Read-only transaction boundary breached; connection discarded. Reconnect with mssql_connect_database.");
-    }
+  }
+  if (fnFailed) throw fnError;
+  if (breached) {
+    throw new Error("Read-only transaction boundary breached; connection discarded. Reconnect with mssql_connect_database.");
+  }
+  if (cleanupFailed) {
     throw new Error(`Read-only cleanup failed (${msg(cleanupError)}); connection discarded. Reconnect with mssql_connect_database.`, {
       cause: cleanupError,
     });
