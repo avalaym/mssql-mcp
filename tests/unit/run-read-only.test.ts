@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { test } from "node:test";
+import { test, mock, beforeEach, afterEach } from "node:test";
 import type sql from "mssql";
 import { runReadOnly } from "../../src/policy/read-only.js";
 
@@ -20,6 +20,16 @@ function harness(opts: { rollback?: Error; invalidate?: Error } = {}) {
 }
 const abort = Object.assign(new Error("Transaction has been aborted."), { code: "EABORT" });
 
+// runReadOnly logs to stderr on rollback failures; stub it so test output stays clean
+// and assert on the logging where it is part of the behaviour under test.
+let errorMock: { mock: { calls: { arguments: unknown[] }[] } };
+beforeEach(() => {
+  errorMock = mock.method(console, "error", () => {});
+});
+afterEach(() => {
+  mock.restoreAll();
+});
+
 test("(a) success + rollback ok -> result, no invalidate, LOCK_TIMEOUT before fn", async () => {
   const h = harness();
   const r = await runReadOnly(h.pool, async (req) => (await req.query("SELECT 1")).recordset, h.deps);
@@ -30,6 +40,8 @@ test("(b) success + rollback fails -> throws rollback error, invalidates", async
   const h = harness({ rollback: new Error("boom") });
   await assert.rejects(runReadOnly(h.pool, async () => 1, h.deps), /Read-only rollback failed \(boom\); connection discarded\. Reconnect with mssql_connect_database\./);
   assert.equal(h.log.filter((l) => l === "invalidate").length, 1);
+  assert.equal(errorMock.mock.calls.length, 1);
+  assert.match(String(errorMock.mock.calls[0].arguments[0]), /read-only rollback failed/);
 });
 test("(c) fn fails + rollback fails -> throws fn error, invalidates", async () => {
   const h = harness({ rollback: new Error("boom") });
@@ -44,6 +56,9 @@ test("(d) fn fails + rollback ok -> throws fn error, no invalidate", async () =>
 test("(f) success + rollback fails + invalidate fails -> rollback error mentions unusable", async () => {
   const h = harness({ rollback: new Error("boom"), invalidate: new Error("close failed") });
   await assert.rejects(runReadOnly(h.pool, async () => 1, h.deps), /connection could not be closed \(close failed\) and is marked unusable/);
+  assert.equal(errorMock.mock.calls.length, 2);
+  assert.match(String(errorMock.mock.calls[0].arguments[0]), /read-only rollback failed/);
+  assert.match(String(errorMock.mock.calls[1].arguments[0]), /pool invalidation failed/);
 });
 test("(g) fn fails + rollback fails + invalidate fails -> fn error wins", async () => {
   const h = harness({ rollback: new Error("boom"), invalidate: new Error("close failed") });
