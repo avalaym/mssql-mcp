@@ -63,28 +63,78 @@ test("McpToolError - cause is undefined when not provided", () => {
   assert.equal(err.cause, undefined);
 });
 
-// --- formatFatalError (issue #5) ---
+// --- formatFatalError (issue #5 follow-up) ---
 
 test("formatFatalError - includes the error message for a normal Error", () => {
   const result = formatFatalError(new Error("boom"));
   assert.ok(result.includes("boom"));
 });
 
-test("formatFatalError - bounds the number of stack lines", () => {
-  const err = new Error("deep");
-  err.stack = Array.from({ length: 5000 }, (_, i) => `    at frame${i} (file.js:1:1)`).join("\n");
+test("formatFatalError - prints the cause chain", () => {
+  const err = new Error("outer", { cause: new Error("inner cause") });
   const result = formatFatalError(err);
+  assert.ok(result.includes("outer"));
+  assert.ok(result.includes("inner cause"));
+});
+
+test("formatFatalError - prints driver fields such as code and originalError", () => {
+  const err = new Error("Failed to connect") as Error & { code?: string; originalError?: Error };
+  err.code = "ESOCKET";
+  err.originalError = new Error("getaddrinfo ENOTFOUND db.example");
+  const result = formatFatalError(err);
+  assert.ok(result.includes("ESOCKET"));
+  assert.ok(result.includes("getaddrinfo ENOTFOUND db.example"));
+});
+
+test("formatFatalError - prints the inner errors of an AggregateError", () => {
+  const err = new AggregateError([new Error("first inner"), new Error("second inner")], "agg");
+  const result = formatFatalError(err);
+  assert.ok(result.includes("first inner"));
+  assert.ok(result.includes("second inner"));
+});
+
+test("formatFatalError - prints the fields of a non-Error object instead of [object Object]", () => {
+  const result = formatFatalError({ code: "ETIMEOUT", message: "timed out" });
+  assert.ok(!result.includes("[object Object]"));
+  assert.ok(result.includes("ETIMEOUT"));
+  assert.ok(result.includes("timed out"));
+});
+
+test("formatFatalError - does not throw for objects without toString or with a throwing toString", () => {
+  const nullProto = Object.create(null) as Record<string, unknown>;
+  nullProto.x = 1;
+  assert.doesNotThrow(() => formatFatalError(nullProto));
+  assert.ok(formatFatalError(nullProto).includes("x: 1"));
+  const hostile = { toString() { throw new Error("nope"); } };
+  assert.doesNotThrow(() => formatFatalError(hostile));
+});
+
+test("formatFatalError - handles circular object graphs", () => {
+  const obj: Record<string, unknown> = { name: "root" };
+  obj.self = obj;
+  assert.doesNotThrow(() => formatFatalError(obj));
+  assert.ok(formatFatalError(obj).includes("root"));
+});
+
+test("formatFatalError - bounds the total output for a huge object", () => {
+  const huge: Record<string, unknown> = {};
+  for (let i = 0; i < 5000; i++) huge[`k${i}`] = { nested: `v${i}` };
+  const result = formatFatalError(huge);
   const lineCount = result.split("\n").length;
-  assert.ok(lineCount <= 20, `Expected at most 20 lines, got ${lineCount}`);
+  assert.ok(lineCount <= 200, `Expected at most 200 lines, got ${lineCount}`);
 });
 
-test("formatFatalError - falls back to the message when stack is unavailable", () => {
-  const err = new Error("no stack");
-  err.stack = undefined;
-  assert.equal(formatFatalError(err), "no stack");
+test("formatFatalError - redacts credential-like fields", () => {
+  const err = new Error("login") as Error & { config?: unknown };
+  err.config = { user: "svc", password: "s3cret-value", options: { token: "tok-value" } };
+  const result = formatFatalError(err);
+  assert.ok(!result.includes("s3cret-value"));
+  assert.ok(!result.includes("tok-value"));
+  assert.ok(result.includes("[redacted]"));
+  assert.ok(result.includes("svc"));
 });
 
-test("formatFatalError - stringifies non-Error values", () => {
-  assert.equal(formatFatalError("plain reason"), "plain reason");
+test("formatFatalError - stringifies primitive values", () => {
+  assert.ok(formatFatalError("plain reason").includes("plain reason"));
   assert.equal(formatFatalError(42), "42");
 });

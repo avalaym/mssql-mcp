@@ -1,3 +1,4 @@
+import { inspect } from "node:util";
 import { normalizeOutput } from "./format.js";
 
 export class McpToolError extends Error {
@@ -14,19 +15,28 @@ export function toActionableError(error: unknown): string {
   return String(error);
 }
 
-const MAX_FATAL_STACK_LINES = 20;
+// Logging a process-fatal error (uncaughtException/unhandledRejection) must
+// (a) never throw itself, or the shutdown path is skipped and the pool is
+// left open, (b) keep the fields that identify the failure: `cause`, Node's
+// `code`/`errno`/`syscall`, mssql/tedious `number`/`lineNumber`/`originalError`,
+// and `AggregateError.errors`, and (c) be bounded, so a pathological object
+// graph cannot turn the crash log into a multi-megabyte stderr write.
+// util.inspect gives (a) and (b) for any value, including null-prototype
+// objects, objects with a throwing toString, and circular graphs.
+// See https://github.com/BYMCS/mssql-mcp/issues/5.
+const FATAL_INSPECT_DEPTH = 4;
+const FATAL_MAX_LINES = 200;
+// Defence in depth: the drivers in use attach only code/cause/originalError to
+// their errors, but an arbitrary application error may carry a config object.
+const REDACT_KEY_PATTERN = /((?:^|[\s{,])(?:password|pwd|secret|token|authorization)\s*:\s*)(['"`])(?:(?!\2).)*\2/gi;
 
-// For logging a process-fatal error (uncaughtException/unhandledRejection):
-// prints the message plus a bounded number of stack lines instead of the raw
-// Error object, so a pathologically deep call stack can't make the shutdown
-// path itself slow. See https://github.com/BYMCS/mssql-mcp/issues/5.
 export function formatFatalError(error: unknown): string {
-  if (error instanceof Error) {
-    if (!error.stack) return error.message;
-    const lines = error.stack.split("\n").slice(0, MAX_FATAL_STACK_LINES);
-    return lines.join("\n");
-  }
-  return String(error);
+  const inspected = inspect(error, { depth: FATAL_INSPECT_DEPTH, breakLength: 120 });
+  const redacted = inspected.replace(REDACT_KEY_PATTERN, "$1'[redacted]'");
+  const lines = redacted.split("\n");
+  if (lines.length <= FATAL_MAX_LINES) return redacted;
+  const kept = lines.slice(0, FATAL_MAX_LINES - 1);
+  return `${kept.join("\n")}\n... (${lines.length - kept.length} more lines truncated)`;
 }
 
 export function toolError(message: string) {
