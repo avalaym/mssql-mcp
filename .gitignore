@@ -43,6 +43,7 @@ coverage/
 
 # Local docs / planning files
 docs/
+ADAPTATION-PLAN.md
 
 # Optional npm cache directory
 .npm
