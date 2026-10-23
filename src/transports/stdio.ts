@@ -8,17 +8,27 @@ export async function runStdioTransport(server: McpServer): Promise<void> {
   const transport = new StdioServerTransport();
 
   let shuttingDown = false;
-  // exitCode 0 for an orderly stop (signal, stdin EOF), 1 for a crash. A
-  // crashed server must not report success to its supervisor, and a hung
-  // pool.close() must not keep it alive: the timer forces the exit.
-  const shutdown = async (reason: string, exitCode = 0) => {
+  // The exit status is the worst one requested so far: a crash that lands
+  // while an orderly shutdown is already running must still exit non-zero.
+  let exitCode = 0;
+  // Exit 0 for an orderly stop (signal, stdin EOF), 1 for a crash. A crashed
+  // server must not report success to its supervisor, and a hung pool.close()
+  // must not keep it alive: the timer forces the exit.
+  const shutdown = async (reason: string, requestedExitCode = 0) => {
+    if (requestedExitCode > exitCode) {
+      exitCode = requestedExitCode;
+      process.exitCode = exitCode;
+    }
     if (shuttingDown) return;
     shuttingDown = true;
+    process.exitCode = exitCode;
     console.error(`\nShutting down (${reason})...`);
     const forceExit = setTimeout(() => {
       console.error(`Shutdown timed out after ${SHUTDOWN_TIMEOUT_MS}ms; exiting.`);
       process.exit(exitCode);
-    }, SHUTDOWN_TIMEOUT_MS).unref();
+    }, SHUTDOWN_TIMEOUT_MS);
+    // Deliberately not unref'd: if the hung close operation is the only thing
+    // left, the loop must stay alive for this timer to force the exit.
     try {
       await closePoolOnShutdown();
       console.error("Server stopped.");

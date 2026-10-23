@@ -29,16 +29,47 @@ const FATAL_MAX_LINES = 200;
 // Defence in depth: the drivers in use attach only code/cause/originalError to
 // their errors, but an arbitrary application error may carry a config object.
 // Masks the value of any key that contains a credential-like word
-// (db_password, saPassword, accessToken, ...) whether util.inspect rendered
-// it as a quoted string, a number/boolean/identifier, or the first line of a
-// nested object (nested credential keys are masked by the same pass).
+// (db_password, saPassword, accessToken, ...). util.inspect renders a value
+// either inline (quoted string, bare number/boolean, one-line object/array)
+// or as a multi-line block whose closing bracket sits at the key's own
+// indentation; both shapes are handled, so a nested `bearer: '...'` inside a
+// wrapped `authorization: { ... }` block is masked with the block.
 // Over-masking a harmless key such as tokenCount is acceptable in a crash log.
-const REDACT_KEY_PATTERN =
-  /((?:^|[\s{,])[\w$-]*(?:password|pwd|secret|token|authorization)[\w$-]*\s*:\s*)(?:(['"`])(?:(?!\2).)*\2|[^,\n}]+)/gi;
+const REDACT_KEY = String.raw`[\w$-]*(?:password|pwd|secret|token|authorization)[\w$-]*`;
+const REDACT_BLOCK_PATTERN = new RegExp(
+  String.raw`^([ \t]*)(${REDACT_KEY}\s*:\s*)[\[{][^\n]*\n(?:(?!\1[\]}]).*\n)*?\1[\]}]`,
+  "gim"
+);
+// An inline object/array value, with brackets balanced up to the inspect
+// depth (util.inspect never renders deeper than FATAL_INSPECT_DEPTH levels).
+const INLINE_BRACKETED = (() => {
+  let level = String.raw`[\[{][^\[\]{}\n]*[\]}]`;
+  for (let i = 1; i < FATAL_INSPECT_DEPTH; i++) {
+    level = String.raw`[\[{](?:[^\[\]{}\n]|${level})*[\]}]`;
+  }
+  return level;
+})();
+const REDACT_INLINE_PATTERN = new RegExp(
+  String.raw`((?:^|[\s{,\[])${REDACT_KEY}\s*:\s*)(?:(['"\x60])(?:(?!\2).)*\2|${INLINE_BRACKETED}|[^,\n}\]]+)`,
+  "gi"
+);
+
+function redactCredentials(text: string): string {
+  return text
+    .replace(REDACT_BLOCK_PATTERN, "$1$2[redacted]")
+    .replace(REDACT_INLINE_PATTERN, "$1[redacted]");
+}
 
 export function formatFatalError(error: unknown): string {
-  const inspected = inspect(error, { depth: FATAL_INSPECT_DEPTH, breakLength: 120 });
-  const redacted = inspected.replace(REDACT_KEY_PATTERN, "$1[redacted]");
+  let inspected: string;
+  try {
+    // customInspect: false so a throwing [util.inspect.custom] hook on the
+    // value cannot make the crash handler itself throw.
+    inspected = inspect(error, { depth: FATAL_INSPECT_DEPTH, breakLength: 120, customInspect: false });
+  } catch (inspectError) {
+    inspected = `[unprintable ${typeof error}: ${toActionableError(inspectError)}]`;
+  }
+  const redacted = redactCredentials(inspected);
   const lines = redacted.split("\n");
   if (lines.length <= FATAL_MAX_LINES) return redacted;
   const kept = lines.slice(0, FATAL_MAX_LINES - 1);

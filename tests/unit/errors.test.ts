@@ -166,6 +166,33 @@ test("formatFatalError - redacts unquoted credential values (numbers, identifier
   assert.ok(result.includes("user: 7"));
 });
 
+test("formatFatalError - masks a credential object that util.inspect wraps over several lines", () => {
+  const long = "fixture-value-6-" + "x".repeat(100);
+  const reason = {
+    ...withKey(AUTH_KEY, { bearer: long, other: 1 }),
+    after: "still-here",
+  };
+  const result = formatFatalError(reason);
+  assert.ok(!result.includes(long));
+  assert.ok(!result.includes("bearer"));
+  assert.ok(result.includes("after: 'still-here'"));
+});
+
+test("formatFatalError - masks an inline array under a credential key", () => {
+  const reason = { list: withKey(TOKEN_KEY + "s", ["fixture-value-7", "fixture-value-8"]), n: 1 };
+  const result = formatFatalError(reason);
+  assert.ok(!result.includes("fixture-value-7"));
+  assert.ok(!result.includes("fixture-value-8"));
+  assert.ok(result.includes("n: 1"));
+});
+
+test("formatFatalError - does not throw when the value has a throwing inspect.custom hook", () => {
+  const hostile = { [Symbol.for("nodejs.util.inspect.custom")]() { throw new Error("hook"); }, id: 9 };
+  let result = "";
+  assert.doesNotThrow(() => { result = formatFatalError(hostile); });
+  assert.ok(result.includes("id: 9"));
+});
+
 test("formatFatalError - stringifies primitive values", () => {
   assert.ok(formatFatalError("plain reason").includes("plain reason"));
   assert.equal(formatFatalError(42), "42");
