@@ -9,21 +9,25 @@ import { registerProcedureTools } from "./tools/procedure.js";
 import { registerDatabasesTools } from "./tools/databases.js";
 import { registerConnectionResource } from "./resources/connection.js";
 import { registerMetadataResources } from "./resources/metadata.js";
+import { isReadOnlyMode } from "./policy/read-only.js";
+import type { ToolRegistrationOptions } from "./types.js";
 
-export function createServer(): McpServer {
+export function createServer(options: { readOnly?: boolean } = {}): McpServer {
+  const readOnly = options.readOnly ?? isReadOnlyMode();
+  const opts: ToolRegistrationOptions = { readOnly };
   const server = new McpServer({
     name: SERVER_NAME,
     version: SERVER_VERSION,
   });
 
-  registerConnectTools(server);
-  registerStatusTool(server);
-  registerQueryTools(server);
-  registerSchemaTools(server);
-  registerTableTools(server);
-  registerProcedureTools(server);
+  registerConnectTools(server, opts);
+  registerStatusTool(server, opts);
+  registerQueryTools(server, opts);
+  registerSchemaTools(server, opts);
+  registerTableTools(server, opts);
+  if (!readOnly) registerProcedureTools(server);
   registerDatabasesTools(server);
-  registerConnectionResource(server);
+  registerConnectionResource(server, opts);
   registerMetadataResources(server);
 
   return server;
