@@ -39,7 +39,7 @@
     "check:version": "node scripts/check-version-sync.mjs",
     "check": "npm run check:tests && npm run check:version",
     "typecheck": "tsc --noEmit",
-    "test": "node --test dist/tests/unit/validators.test.js dist/tests/unit/query-builders.test.js dist/tests/unit/tool-contracts.test.js dist/tests/unit/markdown.test.js dist/tests/unit/errors.test.js dist/tests/unit/config.test.js dist/tests/unit/format.test.js dist/tests/unit/repo-guards.test.js dist/tests/unit/connection-config.test.js dist/tests/unit/connection-poison.test.js dist/tests/unit/read-only.test.js",
+    "test": "node --test dist/tests/unit/validators.test.js dist/tests/unit/query-builders.test.js dist/tests/unit/tool-contracts.test.js dist/tests/unit/markdown.test.js dist/tests/unit/errors.test.js dist/tests/unit/config.test.js dist/tests/unit/format.test.js dist/tests/unit/repo-guards.test.js dist/tests/unit/connection-config.test.js dist/tests/unit/connection-poison.test.js dist/tests/unit/read-only.test.js dist/tests/unit/run-read-only.test.js",
     "test:integration": "node --test dist/tests/integration/*.test.js",
     "ci": "npm run lint && npm run check && npm run typecheck && npm run build && npm test",
     "check:release-tag": "node scripts/check-release-tag.mjs"

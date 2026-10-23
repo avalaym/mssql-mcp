@@ -11,6 +11,9 @@ export const POOL_MAX = 10;
 export const POOL_MIN = 0;
 export const POOL_IDLE_TIMEOUT_MS = 30000;
 
+// Lock wait limit applied inside every read-only transaction (SET LOCK_TIMEOUT).
+export const READ_ONLY_LOCK_TIMEOUT_MS = 5000;
+
 export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 200;
 export const MAX_TEXT_PAYLOAD_BYTES = 100_000;

@@ -3,6 +3,11 @@
 // that is not a single SELECT/WITH statement and any obvious write, DDL, exec or
 // system-procedure keyword. The DB login should still be read-only as well.
 
+import sql from "mssql";
+import { poisonAndClosePool } from "../db/connection.js";
+import { READ_ONLY_LOCK_TIMEOUT_MS } from "../constants.js";
+import { toActionableError } from "../utils/errors.js";
+
 export function isReadOnlyMode(env: NodeJS.ProcessEnv = process.env): boolean {
   const value = (env.MSSQL_MCP_READ_ONLY ?? "").trim().toLowerCase();
   return !(value === "false" || value === "0");
@@ -77,4 +82,71 @@ export function assertReadOnlyStatement(statement: string): void {
 
 export function assertSafeWhereClause(whereClause: string): void {
   scan(whereClause, "Unsafe whereClause: ", false);
+}
+
+export interface ReadOnlyTransaction {
+  begin(): Promise<unknown>;
+  rollback(): Promise<unknown>;
+}
+
+export interface RunReadOnlyDeps {
+  createTransaction(pool: sql.ConnectionPool): ReadOnlyTransaction;
+  createRequest(tx: ReadOnlyTransaction): sql.Request;
+  invalidatePool(): Promise<void>;
+}
+
+const defaultRunReadOnlyDeps: RunReadOnlyDeps = {
+  createTransaction: (p) => new sql.Transaction(p),
+  createRequest: (tx) => new sql.Request(tx as sql.Transaction),
+  invalidatePool: poisonAndClosePool,
+};
+
+/**
+ * Runs fn inside a transaction that is always rolled back, so nothing a read-only
+ * statement does can persist. If the rollback fails for a reason other than
+ * EABORT (the server already rolled back), the pool is discarded because its
+ * session state can no longer be trusted.
+ */
+export async function runReadOnly<T>(
+  pool: sql.ConnectionPool,
+  fn: (request: sql.Request) => Promise<T>,
+  deps: Partial<RunReadOnlyDeps> = {},
+): Promise<T> {
+  const d: RunReadOnlyDeps = { ...defaultRunReadOnlyDeps, ...deps };
+  const tx = d.createTransaction(pool);
+  await tx.begin();
+
+  let result!: T;
+  let fnFailed = false;
+  let fnError: unknown;
+  try {
+    await d.createRequest(tx).batch(`SET LOCK_TIMEOUT ${READ_ONLY_LOCK_TIMEOUT_MS}`);
+    result = await fn(d.createRequest(tx));
+  } catch (e) {
+    fnFailed = true;
+    fnError = e;
+  }
+
+  try {
+    await tx.rollback();
+  } catch (rollbackError) {
+    if ((rollbackError as { code?: string } | null)?.code !== "EABORT") {
+      console.error("read-only rollback failed:", toActionableError(rollbackError));
+      let cleanupNote = "connection discarded";
+      try {
+        await d.invalidatePool();
+      } catch (invalidateError) {
+        console.error("pool invalidation failed:", toActionableError(invalidateError));
+        cleanupNote = `connection could not be closed (${toActionableError(invalidateError)}) and is marked unusable`;
+      }
+      if (fnFailed) throw fnError;
+      throw new Error(
+        `Read-only rollback failed (${toActionableError(rollbackError)}); ${cleanupNote}. Reconnect with mssql_connect_database.`,
+        { cause: rollbackError },
+      );
+    }
+  }
+
+  if (fnFailed) throw fnError;
+  return result;
 }
