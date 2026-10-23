@@ -23,7 +23,7 @@ export function toActionableError(error: unknown): string {
 // graph cannot turn the crash log into a multi-megabyte stderr write.
 // util.inspect gives (a) and (b) for any value, including null-prototype
 // objects, objects with a throwing toString, and circular graphs.
-// See https://github.com/BYMCS/mssql-mcp/issues/5.
+// See upstream issue https://github.com/BYMCS/mssql-mcp/issues/5.
 const FATAL_INSPECT_DEPTH = 4;
 const FATAL_MAX_LINES = 200;
 // util.inspect caps each string at 10 000 chars by default, so a line cap

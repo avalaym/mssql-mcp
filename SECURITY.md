@@ -4,14 +4,16 @@
 
 | Version | Supported |
 | ------- | --------- |
-| 2.x     | ✅ Yes    |
-| < 2.0   | ❌ No     |
+| 3.x     | ✅ Yes    |
+| < 3.0   | ❌ No     |
 
 ## Reporting a Vulnerability
 
-Please **do not** open a public GitHub issue for security vulnerabilities.
+Please **do not** disclose security vulnerabilities publicly (public issues are disabled on this repository).
 
-Instead, use [GitHub's private security advisory feature](https://github.com/BYMCS/mssql-mcp/security/advisories/new) to report vulnerabilities privately. You will receive a response within 7 business days.
+Report them privately through [GitHub's private vulnerability reporting](https://github.com/avalaym/mssql-mcp/security/advisories/new) for this fork, or contact the maintainer directly via [github.com/avalaym](https://github.com/avalaym). You will receive a response within 7 business days.
+
+This fork is maintained independently of the original project; vulnerabilities in this fork's releases (GitHub Packages / GitHub Releases) are handled here, not upstream.
 
 ## Safe Deployment Recommendations
 

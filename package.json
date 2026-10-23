@@ -18,7 +18,7 @@
   },
   "homepage": "https://github.com/avalaym/mssql-mcp#readme",
   "bugs": {
-    "url": "https://github.com/avalaym/mssql-mcp/issues"
+    "url": "https://github.com/avalaym/mssql-mcp"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com",
@@ -55,7 +55,10 @@
     "vscode",
     "model-context-protocol"
   ],
-  "author": "BYMCS <hello@bymcs.com>",
+  "author": "Angel Valay (https://github.com/avalaym)",
+  "contributors": [
+    "BYMCS (original project: https://github.com/BYMCS/mssql-mcp)"
+  ],
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/node": "2.0.0",

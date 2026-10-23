@@ -105,7 +105,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 // references. Without this, a pathological result shape can recurse until
 // the call stack overflows, and V8 stack-trace symbolication for an error
 // thrown from such a deep stack is itself extremely expensive — see
-// https://github.com/BYMCS/mssql-mcp/issues/5.
+// upstream issue https://github.com/BYMCS/mssql-mcp/issues/5.
 const MAX_NORMALIZE_DEPTH = 50;
 const MAX_DEPTH_PLACEHOLDER = "[max depth exceeded]";
 const CIRCULAR_PLACEHOLDER = "[circular reference]";
