@@ -5,7 +5,11 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [3.0.0] - Unreleased
+## [Unreleased]
+
+_Nothing yet._
+
+## [3.0.0] - 2026-10-23
 
 ### Added
 
@@ -132,3 +136,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 Versions prior to 2.2.0 were not tracked in a changelog; the summary above is
 reconstructed from git history.
+
+[Unreleased]: https://github.com/avalaym/mssql-mcp/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/avalaym/mssql-mcp/releases/tag/v3.0.0
