@@ -182,7 +182,9 @@ export async function runReadOnly<T>(
   } catch (rollbackError) {
     if (errorCode(rollbackError) === "EABORT") {
       if (fnFailed) throw fnError;
-      throw new Error("Read-only transaction was aborted during the query; result discarded. Reconnect is not required.");
+      throw new Error("Read-only transaction was aborted during the query; result discarded. Reconnect is not required.", {
+        cause: rollbackError,
+      });
     }
     console.error("read-only rollback failed:", msg(rollbackError));
     let cleanupNote = "connection discarded";
