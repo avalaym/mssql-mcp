@@ -150,6 +150,8 @@ test("formatFatalError - redacts credential-like fields", () => {
 
 test("formatFatalError - redacts unquoted credential values (numbers, identifiers, nested objects)", () => {
   const reason = {
+    ...withKey("db_" + PASSWORD_KEY, "fixture-value-4"),
+    ...withKey("sa" + "Pass" + "word", "fixture-value-5"),
     ...withKey("pwd", 123456),
     ...withKey(SECRET_KEY, true),
     ...withKey(AUTH_KEY, { bearer: "fixture-value-3" }),
@@ -159,6 +161,8 @@ test("formatFatalError - redacts unquoted credential values (numbers, identifier
   assert.ok(!result.includes("123456"));
   assert.ok(!result.includes("true"));
   assert.ok(!result.includes("fixture-value-3"));
+  assert.ok(!result.includes("fixture-value-4"));
+  assert.ok(!result.includes("fixture-value-5"));
   assert.ok(result.includes("user: 7"));
 });
 

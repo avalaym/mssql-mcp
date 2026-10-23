@@ -182,7 +182,7 @@ test("normalizeOutput - same object appearing twice (not a cycle) is normalized 
   assert.deepEqual(result.b, { id: 1 });
 });
 
-test("normalizeOutput - recordset row that references itself is detected on the first visit", () => {
+test("normalizeOutput - recordset row that references itself yields the circular placeholder directly", () => {
   const row: Record<string, unknown> = { id: 1 };
   row.self = row;
   const recordset = Object.assign([row], { columns: { id: { type: "int" } } });
