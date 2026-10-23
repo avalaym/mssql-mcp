@@ -156,3 +156,122 @@ test("check-version-sync: does not match a prerelease prefix loosely", () => {
     assert.equal(r.status, 1);
   });
 });
+
+const releaseTagScript = join(scriptsDir, "check-release-tag.mjs");
+
+function runTag(tag: string, root: string) {
+  const res = spawnSync(process.execPath, [releaseTagScript, tag, root], { encoding: "utf8" });
+  return { status: res.status, stdout: res.stdout, stderr: res.stderr };
+}
+
+test("check-release-tag: passes when the tag matches package.json", () => {
+  withRepo({ version: "3.0.0" }, (root) => {
+    const r = runTag("v3.0.0", root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /OK: tag v3\.0\.0 matches package\.json version 3\.0\.0/);
+  });
+});
+
+test("check-release-tag: accepts a prerelease tag that matches exactly", () => {
+  withRepo({ version: "3.1.0-rc.1" }, (root) => {
+    const r = runTag("v3.1.0-rc.1", root);
+    assert.equal(r.status, 0, r.stderr);
+  });
+});
+
+test("check-release-tag: fails when the tag and package.json diverge", () => {
+  withRepo({ version: "3.0.1" }, (root) => {
+    const r = runTag("v3.0.0", root);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /tag v3\.0\.0 .* package\.json version 3\.0\.1/);
+  });
+});
+
+test("check-release-tag: fails when the tag lacks the v prefix", () => {
+  withRepo({ version: "3.0.0" }, (root) => {
+    const r = runTag("3.0.0", root);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /must look like v<major>\.<minor>\.<patch>/);
+  });
+});
+
+test("check-release-tag: fails when no tag is given", () => {
+  withRepo({ version: "3.0.0" }, (root) => {
+    const res = spawnSync(process.execPath, [releaseTagScript], { encoding: "utf8", cwd: root });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /Usage: /);
+  });
+});
+
+const changelogScript = join(scriptsDir, "changelog-section.mjs");
+
+const SAMPLE_CHANGELOG = `# Changelog
+
+Intro text.
+
+## [3.1.0] - 2026-11-01
+
+### Added
+
+- Thing one.
+
+## [3.0.0] - Unreleased
+
+### Changed
+
+- Thing two.
+- Thing three.
+
+## [2.9.0] - 2026-01-01
+
+- Old.
+`;
+
+function runChangelog(version: string, changelog: string | null) {
+  const root = mkdtempSync(join(tmpdir(), "changelog-"));
+  try {
+    if (changelog !== null) writeFileSync(join(root, "CHANGELOG.md"), changelog);
+    const res = spawnSync(process.execPath, [changelogScript, version, root], { encoding: "utf8" });
+    return { status: res.status, stdout: res.stdout, stderr: res.stderr };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("changelog-section: prints exactly the requested version's section", () => {
+  const r = runChangelog("3.0.0", SAMPLE_CHANGELOG);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "### Changed\n\n- Thing two.\n- Thing three.\n");
+});
+
+test("changelog-section: works for the first and last sections", () => {
+  const first = runChangelog("3.1.0", SAMPLE_CHANGELOG);
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(first.stdout, "### Added\n\n- Thing one.\n");
+  const last = runChangelog("2.9.0", SAMPLE_CHANGELOG);
+  assert.equal(last.status, 0, last.stderr);
+  assert.equal(last.stdout, "- Old.\n");
+});
+
+test("changelog-section: fails when the version has no section", () => {
+  const r = runChangelog("9.9.9", SAMPLE_CHANGELOG);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /No section for version 9\.9\.9/);
+});
+
+test("changelog-section: does not match a version prefix loosely", () => {
+  const r = runChangelog("3.0", SAMPLE_CHANGELOG);
+  assert.equal(r.status, 1);
+});
+
+test("changelog-section: fails when CHANGELOG.md is missing", () => {
+  const r = runChangelog("3.0.0", null);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /CHANGELOG\.md/);
+});
+
+test("changelog-section: fails when no version is given", () => {
+  const res = spawnSync(process.execPath, [changelogScript], { encoding: "utf8" });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /Usage: /);
+});

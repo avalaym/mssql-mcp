@@ -1,5 +1,5 @@
 {
-  "name": "mssql-mcp",
+  "name": "@avalaym/mssql-mcp",
   "version": "3.0.0",
   "description": "MCP Server for MS SQL Server integration with Claude Desktop, Cursor, Windsurf and VS Code",
   "main": "dist/src/index.js",
@@ -14,11 +14,15 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BYMCS/mssql-mcp.git"
+    "url": "git+https://github.com/avalaym/mssql-mcp.git"
   },
-  "homepage": "https://github.com/BYMCS/mssql-mcp#readme",
+  "homepage": "https://github.com/avalaym/mssql-mcp#readme",
   "bugs": {
-    "url": "https://github.com/BYMCS/mssql-mcp/issues"
+    "url": "https://github.com/avalaym/mssql-mcp/issues"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -37,7 +41,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test dist/tests/unit/validators.test.js dist/tests/unit/query-builders.test.js dist/tests/unit/tool-contracts.test.js dist/tests/unit/markdown.test.js dist/tests/unit/errors.test.js dist/tests/unit/config.test.js dist/tests/unit/format.test.js dist/tests/unit/repo-guards.test.js",
     "test:integration": "node --test dist/tests/integration/*.test.js",
-    "ci": "npm run lint && npm run check && npm run typecheck && npm run build && npm test"
+    "ci": "npm run lint && npm run check && npm run typecheck && npm run build && npm test",
+    "check:release-tag": "node scripts/check-release-tag.mjs"
   },
   "keywords": [
     "mcp",

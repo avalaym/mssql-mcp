@@ -1,0 +1,164 @@
+name: Release
+
+# Publishes a versioned package every time a `vX.Y.Z` tag is pushed:
+#   1. the npm package `@avalaym/mssql-mcp` on GitHub Packages, and
+#   2. a GitHub Release carrying the `npm pack` tarball (+ SHA-256) so the
+#      server can be installed without any registry authentication.
+#
+# The tag must match package.json / SERVER_VERSION exactly; otherwise the
+# workflow fails before anything is published. See CONTRIBUTING.md "Releasing".
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PACKAGE_NAME: "@avalaym/mssql-mcp"
+
+jobs:
+  # Same DB-free gates as CI, plus the tag/version guard. Nothing is
+  # published unless this job is green.
+  verify:
+    name: Verify tag & build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      tarball: ${{ steps.meta.outputs.tarball }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Tag matches package.json
+        run: npm run check:release-tag -- "$GITHUB_REF_NAME"
+
+      - name: Lint, repo checks, typecheck, build, unit tests
+        run: npm run ci
+
+      - name: Package metadata
+        id: meta
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+          # npm pack names scoped tarballs <scope>-<name>-<version>.tgz
+          echo "tarball=avalaym-mssql-mcp-${version}.tgz" >> "$GITHUB_OUTPUT"
+
+      - name: Build tarball
+        run: |
+          npm pack
+          test -f "${{ steps.meta.outputs.tarball }}"
+          sha256sum "${{ steps.meta.outputs.tarball }}" > "${{ steps.meta.outputs.tarball }}.sha256"
+          cat "${{ steps.meta.outputs.tarball }}.sha256"
+
+      - name: Smoke test the tarball (global install, bin exits on stdin EOF)
+        run: |
+          prefix="$(mktemp -d)"
+          npm install -g --prefix "$prefix" "./${{ steps.meta.outputs.tarball }}"
+          # Server starts with no DB config and must shut down cleanly on EOF.
+          echo -n | "$prefix/bin/mssql-mcp-server"
+
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-tarball
+          path: |
+            ${{ steps.meta.outputs.tarball }}
+            ${{ steps.meta.outputs.tarball }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  # Channel 1: GitHub Packages (npm registry). Consumers need a token with
+  # read:packages even for public packages; see README "Install".
+  publish-github-packages:
+    name: Publish to GitHub Packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: verify
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: package-tarball
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@avalaym"
+
+      - name: Publish ${{ env.PACKAGE_NAME }}@${{ needs.verify.outputs.version }}
+        run: |
+          tag="latest"
+          if [ "${{ needs.verify.outputs.prerelease }}" = "true" ]; then tag="next"; fi
+          npm publish "./${{ needs.verify.outputs.tarball }}" --tag "$tag"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Channel 2: GitHub Release with the tarball attached. No auth needed to
+  # install from the release asset URL.
+  github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: verify
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: package-tarball
+
+      - name: Release notes from CHANGELOG.md
+        id: notes
+        run: |
+          node scripts/changelog-section.mjs "${{ needs.verify.outputs.version }}" > RELEASE_NOTES.md || {
+            echo "No CHANGELOG.md section for ${{ needs.verify.outputs.version }}; using a generic note." >&2
+            echo "Release ${{ github.ref_name }}. See CHANGELOG.md." > RELEASE_NOTES.md
+          }
+          {
+            echo ""
+            echo "## Install"
+            echo ""
+            echo '```bash'
+            echo "npm install -g https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${{ needs.verify.outputs.tarball }}"
+            echo '```'
+            echo ""
+            echo "Or from GitHub Packages (needs a token with \`read:packages\`): \`npm install -g ${{ env.PACKAGE_NAME }}@${{ needs.verify.outputs.version }}\`."
+          } >> RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: Create release ${{ github.ref_name }}
+        run: |
+          args=(--title "${{ github.ref_name }}" --notes-file RELEASE_NOTES.md --verify-tag)
+          if [ "${{ needs.verify.outputs.prerelease }}" = "true" ]; then args+=(--prerelease); fi
+          gh release create "${{ github.ref_name }}" "${args[@]}" \
+            "${{ needs.verify.outputs.tarball }}" \
+            "${{ needs.verify.outputs.tarball }}.sha256"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
