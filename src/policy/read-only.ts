@@ -8,10 +8,14 @@ export function isReadOnlyMode(env: NodeJS.ProcessEnv = process.env): boolean {
   return !(value === "false" || value === "0");
 }
 
-// Literals and bracketed identifiers are masked before any rule runs, so
-// keywords or punctuation inside them cannot trigger or hide a rule.
-const STRING_LITERAL = /'(?:[^']|'')*'/g; // -> "''"
-const BRACKET_IDENT = /\[[^\]]*\]/g; // -> "[x]"
+// String literals, bracketed identifiers and double-quoted identifiers are
+// masked in ONE pass, so whichever delimiter opens first wins. A quote inside
+// [..] or "..." therefore cannot desynchronise the masking.
+const QUOTED_TOKEN = /'(?:[^']|'')*'|\[(?:[^\]]|\]\])*\]|"(?:[^"]|"")*"/g;
+// Inert placeholders left by the masking. Removing them before the balance
+// check means any delimiter still present is a real unmatched one.
+const INERT_PLACEHOLDER = /''|\[x\]|"x"/g;
+const UNMATCHED_DELIMITER = /['["]/;
 const COMMENT = /--|\/\*/;
 const TRAILING_SEMI = /;\s*$/;
 const FIRST_WORD = /^\s*(SELECT|WITH)\b/i;
@@ -21,8 +25,20 @@ const FORBIDDEN_KEYWORDS =
 // Not preceded by "." or a word character, so dbo.Sp_NotAProc_Table passes.
 const FORBIDDEN_PROC = /(?<![.\w])((?:xp|sp)_\w*)/i;
 
+function maskQuotedTokens(text: string): string {
+  return text.replace(QUOTED_TOKEN, (token) => {
+    if (token.startsWith("'")) return "''";
+    if (token.startsWith("[")) return "[x]";
+    return '"x"';
+  });
+}
+
 function scan(text: string, prefix: string, requireSelect: boolean): void {
-  const masked = text.replace(STRING_LITERAL, "''").replace(BRACKET_IDENT, "[x]");
+  const masked = maskQuotedTokens(text);
+
+  if (UNMATCHED_DELIMITER.test(masked.replace(INERT_PLACEHOLDER, ""))) {
+    throw new Error(`${prefix}unbalanced quote or bracket`);
+  }
 
   if (COMMENT.test(masked)) {
     throw new Error(`${prefix}comments (-- or /* */) are not allowed`);

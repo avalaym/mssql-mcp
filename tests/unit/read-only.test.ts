@@ -12,6 +12,7 @@ const accepted = [
   "SELECT [Update], [Delete] FROM dbo.T", "SELECT 1;", "  \n SELECT 1",
   "SELECT * FROM T ORDER BY id OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY",
   "SELECT 1 WHERE a = 'x; y /* z */ -- w'", "SELECT 1 WHERE a = 'it''s; fine'", "SELECT * FROM dbo.Sp_NotAProc_Table",
+  "SELECT [a]]b], \"Weird Name\" FROM T WHERE x = 'it''s'",
 ];
 const rejected: Array<[string, RegExp]> = [
   ["", /statement is empty/], ["   ", /statement is empty/],
@@ -24,11 +25,16 @@ const rejected: Array<[string, RegExp]> = [
   ["SELECT * FROM OPENROWSET('x','y','z')", /forbidden keyword "OPENROWSET"/],
   ["UPDATE T SET a = 1", /must start with SELECT or WITH/],
   ["WAITFOR DELAY '00:00:05'", /must start with SELECT or WITH/],
-  ["'; DROP TABLE T; --", /comments|single statement|must start/],
+  ["'; DROP TABLE T; --", /unbalanced|comments|single statement|must start/],
   ["SELECT NEXT VALUE FOR dbo.Seq", /forbidden phrase "NEXT VALUE FOR"/],
   ["SELECT nExT   vAlUe\n FoR dbo.Seq", /forbidden phrase "NEXT VALUE FOR"/],
   ["SELECT 1 WHERE 1 = (SELECT COUNT(*) FROM T) UNION SELECT xp_cmdshell('dir')", /forbidden procedure "xp_cmdshell"/],
   ["SELECT 1; SELECT 2", /single statement/],
+  ["SELECT 1 [ ' ] ; DROP TABLE T; -- '", /single statement|unbalanced/],
+  ["SELECT 1 [a'b]; DROP TABLE T; SELECT 'x'", /single statement/],
+  ['SELECT 1 "a\'b"; DROP TABLE T; SELECT \'x\'', /single statement/],
+  ["SELECT [a]]b] FROM T; DROP TABLE T", /single statement/],
+  ["SELECT 1 FROM [T", /unbalanced/],
 ];
 for (const s of accepted) test(`assertReadOnlyStatement accepts ${JSON.stringify(s)}`, () => assertReadOnlyStatement(s));
 for (const [s, re] of rejected) test(`assertReadOnlyStatement rejects ${JSON.stringify(s)}`, () => assert.throws(() => assertReadOnlyStatement(s), re));
@@ -39,6 +45,7 @@ const whereRejected: Array<[string, RegExp]> = [
   ["1=1; DELETE FROM T", /single statement/], ["1=1 -- ", /comments/],
   ["id IN (SELECT id FROM T) OR 1=(SELECT COUNT(*) FROM T WHERE x = 'a'); EXEC xp_cmdshell 'dir'", /single statement/],
   ["id = NEXT VALUE FOR dbo.Seq", /forbidden phrase/], ["a = 1 OR UPDATE", /forbidden keyword "UPDATE"/],
+  ["1=1 [ ' ] ; DROP TABLE T; -- '", /single statement|unbalanced/],
 ];
 for (const s of whereAccepted) test(`assertSafeWhereClause accepts ${JSON.stringify(s)}`, () => assertSafeWhereClause(s));
 for (const [s, re] of whereRejected) test(`assertSafeWhereClause rejects ${JSON.stringify(s)}`, () => assert.throws(() => assertSafeWhereClause(s), re));
