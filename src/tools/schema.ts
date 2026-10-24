@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import sql from "mssql";
 import { requirePool } from "../db/connection.js";
+import type { ToolRegistrationOptions } from "../types.js";
 import { buildSchemaObjectsQuery } from "../db/query-builders.js";
 import { toActionableError, toolError, toolSuccess, toolSuccessMarkdown } from "../utils/errors.js";
 import { formatJson } from "../utils/format.js";
@@ -24,7 +25,7 @@ async function fetchSchemaObjects(
   return result.recordset ?? [];
 }
 
-export function registerSchemaTools(server: McpServer): void {
+export function registerSchemaTools(server: McpServer, options: ToolRegistrationOptions): void {
   server.registerTool(
     "mssql_list_schema_objects",
     {
@@ -78,8 +79,8 @@ export function registerSchemaTools(server: McpServer): void {
     }
   );
 
-  // Backward-compatible alias
-  server.registerTool(
+  // Backward-compatible alias (hidden in read-only mode)
+  if (!options.readOnly) server.registerTool(
     "mssql_get_schema",
     {
       title: "Get Schema (deprecated — use mssql_list_schema_objects)",

@@ -176,3 +176,64 @@ test("loadConfigFromEnv - DB_TRUST_SERVER_CERTIFICATE=true enables trust", () =>
     else delete process.env.DB_TRUST_SERVER_CERTIFICATE;
   }
 });
+
+// --- DB_AUTH_TYPE / DB_DOMAIN ---
+
+const base = { DB_SERVER: "localhost" };
+const SECRET = "s3cr3t-Value-XYZ";
+
+test("loadConfigFromEnv - authType defaults to sql and ignores DB_DOMAIN", () => {
+  const c = loadConfigFromEnv({ ...base, DB_DOMAIN: "EXAMPLE", DB_USER: "analyst@contoso" });
+  assert.equal(c.authType, "sql");
+  assert.equal(c.user, "analyst@contoso");
+  assert.equal(c.domain, undefined);
+});
+
+test("loadConfigFromEnv - ntlm complete, case and whitespace tolerant", () => {
+  const c = loadConfigFromEnv({ ...base, DB_AUTH_TYPE: " NTLM ", DB_DOMAIN: "EXAMPLE", DB_USER: "analyst", DB_PASSWORD: SECRET });
+  assert.equal(c.authType, "ntlm");
+  assert.equal(c.domain, "EXAMPLE");
+  assert.equal(c.user, "analyst");
+  assert.equal(c.password, SECRET);
+});
+
+test("loadConfigFromEnv - empty DB_AUTH_TYPE means sql", () => {
+  assert.equal(loadConfigFromEnv({ ...base, DB_AUTH_TYPE: "" }).authType, "sql");
+});
+
+test("loadConfigFromEnv - unknown DB_AUTH_TYPE", () => {
+  assert.throws(() => loadConfigFromEnv({ ...base, DB_AUTH_TYPE: "kerberos" }),
+    { message: 'DB_AUTH_TYPE must be "sql" or "ntlm"' });
+});
+
+test("loadConfigFromEnv - ntlm without domain", () => {
+  assert.throws(() => loadConfigFromEnv({ ...base, DB_AUTH_TYPE: "ntlm", DB_USER: "analyst", DB_PASSWORD: SECRET }),
+    { message: "DB_AUTH_TYPE=ntlm requires DB_DOMAIN" });
+});
+
+test("loadConfigFromEnv - ntlm without user or password", () => {
+  const msg = "DB_AUTH_TYPE=ntlm requires DB_USER and DB_PASSWORD";
+  assert.throws(() => loadConfigFromEnv({ ...base, DB_AUTH_TYPE: "ntlm", DB_DOMAIN: "EXAMPLE", DB_PASSWORD: SECRET }), { message: msg });
+  assert.throws(() => loadConfigFromEnv({ ...base, DB_AUTH_TYPE: "ntlm", DB_DOMAIN: "EXAMPLE", DB_USER: "analyst" }), { message: msg });
+});
+
+test("loadConfigFromEnv - ntlm rejects DOMAIN\\user and user@domain", () => {
+  const msg = "DB_USER must be the bare account name; put the domain in DB_DOMAIN";
+  assert.throws(() => loadConfigFromEnv({ ...base, DB_AUTH_TYPE: "ntlm", DB_DOMAIN: "EXAMPLE", DB_USER: "EXAMPLE\\analyst", DB_PASSWORD: SECRET }), { message: msg });
+  assert.throws(() => loadConfigFromEnv({ ...base, DB_AUTH_TYPE: "ntlm", DB_DOMAIN: "EXAMPLE", DB_USER: "analyst@example.test", DB_PASSWORD: SECRET }), { message: msg });
+});
+
+test("loadConfigFromEnv - no error message leaks user, domain or password", () => {
+  const cases: NodeJS.ProcessEnv[] = [
+    { ...base, DB_AUTH_TYPE: "bogus", DB_USER: "leaky-user", DB_PASSWORD: SECRET, DB_DOMAIN: "LEAKYDOM" },
+    { ...base, DB_AUTH_TYPE: "ntlm", DB_USER: "leaky-user", DB_PASSWORD: SECRET },
+    { ...base, DB_AUTH_TYPE: "ntlm", DB_DOMAIN: "LEAKYDOM", DB_USER: "LEAKYDOM\\leaky-user", DB_PASSWORD: SECRET },
+  ];
+  for (const env of cases) {
+    assert.throws(() => loadConfigFromEnv(env), (err: Error) => {
+      const text = String(err.message) + String(err.stack ?? "");
+      for (const leak of [SECRET, "leaky-user", "LEAKYDOM"]) assert.equal(text.includes(leak), false, `leaked ${leak}`);
+      return true;
+    });
+  }
+});

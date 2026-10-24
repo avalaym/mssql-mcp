@@ -16,11 +16,15 @@ export interface ToolResult<T = unknown> {
   truncation_message?: string;
 }
 
+export type AuthType = "sql" | "ntlm";
+
 export interface DatabaseConfig {
   server: string;
   database?: string;
   user?: string;
   password?: string;
+  authType: AuthType;
+  domain?: string;
   port: number;
   encrypt: boolean;
   trustServerCertificate: boolean;
@@ -30,11 +34,15 @@ export interface DatabaseConfig {
 
 export interface ConnectionState {
   connected: boolean;
-  config: Pick<DatabaseConfig, "server" | "database" | "port"> | null;
+  config: (Pick<DatabaseConfig, "server" | "database" | "port"> & { auth_type: AuthType; domain?: string }) | null;
   pool_info: {
     size: number;
     available: number;
     pending: number;
     borrowed: number;
   } | null;
+}
+
+export interface ToolRegistrationOptions {
+  readOnly: boolean;
 }

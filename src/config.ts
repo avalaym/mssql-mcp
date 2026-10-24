@@ -13,6 +13,8 @@ export const ConfigSchema = z.object({
   database: z.string().optional(),
   user: z.string().optional(),
   password: z.string().optional(),
+  authType: z.enum(["sql", "ntlm"]).default("sql"),
+  domain: z.string().optional(),
   port: z.number().int().min(1).max(65535).optional().default(DEFAULT_PORT),
   encrypt: z.boolean().optional().default(DEFAULT_ENCRYPT),
   trustServerCertificate: z.boolean().optional().default(DEFAULT_TRUST_SERVER_CERTIFICATE),
@@ -20,24 +22,45 @@ export const ConfigSchema = z.object({
   requestTimeout: z.number().int().min(1000).max(300000).optional().default(DEFAULT_REQUEST_TIMEOUT),
 });
 
-export function loadConfigFromEnv(): DatabaseConfig {
+export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): DatabaseConfig {
+  const authType = (env.DB_AUTH_TYPE ?? "").trim().toLowerCase() || "sql";
+  if (authType !== "sql" && authType !== "ntlm") {
+    throw new Error('DB_AUTH_TYPE must be "sql" or "ntlm"');
+  }
+
   const raw = {
-    server: process.env.DB_SERVER,
-    database: process.env.DB_DATABASE,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : DEFAULT_PORT,
-    encrypt: process.env.DB_ENCRYPT !== "false",
-    trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE === "true",
-    connectionTimeout: process.env.DB_CONNECTION_TIMEOUT
-      ? parseInt(process.env.DB_CONNECTION_TIMEOUT, 10)
+    server: env.DB_SERVER,
+    database: env.DB_DATABASE,
+    user: env.DB_USER,
+    password: env.DB_PASSWORD,
+    authType,
+    domain: authType === "ntlm" ? env.DB_DOMAIN : undefined,
+    port: env.DB_PORT ? parseInt(env.DB_PORT, 10) : DEFAULT_PORT,
+    encrypt: env.DB_ENCRYPT !== "false",
+    trustServerCertificate: env.DB_TRUST_SERVER_CERTIFICATE === "true",
+    connectionTimeout: env.DB_CONNECTION_TIMEOUT
+      ? parseInt(env.DB_CONNECTION_TIMEOUT, 10)
       : DEFAULT_CONNECTION_TIMEOUT,
-    requestTimeout: process.env.DB_REQUEST_TIMEOUT
-      ? parseInt(process.env.DB_REQUEST_TIMEOUT, 10)
+    requestTimeout: env.DB_REQUEST_TIMEOUT
+      ? parseInt(env.DB_REQUEST_TIMEOUT, 10)
       : DEFAULT_REQUEST_TIMEOUT,
   };
 
-  return ConfigSchema.parse(raw) as DatabaseConfig;
+  const config = ConfigSchema.parse(raw) as DatabaseConfig;
+
+  if (config.authType === "ntlm") {
+    if (!config.domain) {
+      throw new Error("DB_AUTH_TYPE=ntlm requires DB_DOMAIN");
+    }
+    if (!config.user || !config.password) {
+      throw new Error("DB_AUTH_TYPE=ntlm requires DB_USER and DB_PASSWORD");
+    }
+    if (config.user.includes("\\") || config.user.includes("@")) {
+      throw new Error("DB_USER must be the bare account name; put the domain in DB_DOMAIN");
+    }
+  }
+
+  return config;
 }
 
 export interface HttpConfig {

@@ -50,7 +50,7 @@ test(
   "mssql_connect_database -> mssql_run_sql_query -> mssql_list_databases -> mssql_disconnect_database (live SQL Server)",
   { skip: hasDbConfig ? false : "DB_SERVER not set; skipping integration test" },
   async () => {
-    const server = createServer();
+    const server = createServer({ readOnly: true });
     const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "integration-test-client", version: "1.0.0" });
 
@@ -68,6 +68,50 @@ test(
       const recordset = queryResult.structuredContent?.recordset as Array<{ value: number }> | undefined;
       assert.equal(recordset?.[0]?.value, 1);
 
+      const tranCount = await callTool(client, "mssql_run_sql_query", { query: "SELECT @@TRANCOUNT AS n" });
+      assert.equal(tranCount.isError, undefined, `trancount failed: ${describeFailure(tranCount)}`);
+      const trancountRows = tranCount.structuredContent?.recordset as Array<{ n: number }> | undefined;
+      assert.equal(trancountRows?.[0]?.n, 1);
+
+      const commit = await callTool(client, "mssql_run_sql_query", { query: "SELECT 1 COMMIT" });
+      assert.equal(commit.isError, true);
+      assert.match(describeFailure(commit), /forbidden keyword "COMMIT"/);
+
+      const expectedSchemes =
+        (process.env.DB_AUTH_TYPE ?? "sql").trim().toLowerCase() === "ntlm" ? ["NTLM", "WINDOWS"] : ["SQL"];
+      assert.ok(
+        connectResult.structuredContent?.session,
+        `connect result has no session block; session_error: ${String(connectResult.structuredContent?.session_error)}`
+      );
+      const session = connectResult.structuredContent.session as {
+        auth_scheme?: string;
+        auth_scheme_error?: string;
+        login_name?: string;
+        principal?: { can_write?: boolean };
+      };
+      assert.ok(
+        expectedSchemes.includes(session.auth_scheme as string),
+        `auth_scheme ${String(session.auth_scheme)} not in ${expectedSchemes.join("/")}; auth_scheme_error: ${String(session.auth_scheme_error)}`
+      );
+      assert.ok(session.login_name, "login_name present");
+      if (process.env.DB_USER === "sa") {
+        assert.equal(session.principal?.can_write, true);
+        assert.match(describeFailure(connectResult), /principal can write/);
+      }
+
+      const ddl = await callTool(client, "mssql_run_sql_query", {
+        query: "CREATE TABLE dbo.__ro_probe (a int)",
+      });
+      assert.equal(ddl.isError, true);
+      assert.match(describeFailure(ddl), /Read-only mode/);
+
+      const injected = await callTool(client, "mssql_read_table_rows", {
+        tableName: "__nope",
+        whereClause: "1=1; DROP TABLE dbo.__nope",
+      });
+      assert.equal(injected.isError, true);
+      assert.match(describeFailure(injected), /Unsafe whereClause/);
+
       const listResult = await callTool(client, "mssql_list_databases", { limit: 5 });
       assert.equal(listResult.isError, undefined, `list databases failed: ${describeFailure(listResult)}`);
       const databases = listResult.structuredContent?.databases as unknown[] | undefined;
@@ -76,9 +120,46 @@ test(
       const statusResult = await callTool(client, "mssql_connection_status");
       assert.equal(statusResult.isError, undefined);
       assert.equal(statusResult.structuredContent?.connected, true);
+      assert.equal(statusResult.structuredContent?.read_only, true);
+      assert.ok(
+        statusResult.structuredContent?.session,
+        `status result has no session block; session_error: ${String(statusResult.structuredContent?.session_error)}`
+      );
+      assert.ok(
+        expectedSchemes.includes((statusResult.structuredContent.session as { auth_scheme?: string }).auth_scheme as string),
+        "status auth_scheme matches expected schemes"
+      );
 
       const disconnectResult = await callTool(client, "mssql_disconnect_database");
       assert.equal(disconnectResult.isError, undefined);
+    } finally {
+      await client.close();
+      await server.close();
+      await disconnectPool();
+    }
+  }
+);
+
+test(
+  "read-write mode does not filter (live SQL Server)",
+  { skip: hasDbConfig ? false : "DB_SERVER not set; skipping integration test" },
+  async () => {
+    const server = createServer({ readOnly: false });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "integration-test-client-rw", version: "1.0.0" });
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    try {
+      const connectResult = await connectWithRetry(client);
+      assert.equal(connectResult.isError, undefined, `connect failed: ${describeFailure(connectResult)}`);
+
+      const result = await callTool(client, "mssql_run_sql_query", {
+        query: "CREATE TABLE #ro_probe (a int); INSERT INTO #ro_probe VALUES (1); SELECT COUNT(*) AS n FROM #ro_probe",
+      });
+      assert.equal(result.isError, undefined, `query failed: ${describeFailure(result)}`);
+      const recordset = result.structuredContent?.recordset as Array<{ n: number }> | undefined;
+      assert.equal(recordset?.[0]?.n, 1);
     } finally {
       await client.close();
       await server.close();

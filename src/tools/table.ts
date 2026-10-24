@@ -2,6 +2,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import sql from "mssql";
 import { requirePool } from "../db/connection.js";
+import { assertSafeWhereClause, runReadOnly } from "../policy/read-only.js";
+import type { ToolRegistrationOptions } from "../types.js";
 import { validateIdentifier, validateOrderBy, SAFE_IDENTIFIER_RE } from "../db/validators.js";
 import { buildSelectQuery, buildSelectWithWhereQuery } from "../db/query-builders.js";
 import { toActionableError, toolError, toolSuccess, toolSuccessMarkdown } from "../utils/errors.js";
@@ -47,21 +49,24 @@ async function fetchTableRows(
     ? buildSelectWithWhereQuery(schemaName, tableName, columns, whereClause, safeOrderBy, offset, limit)
     : buildSelectQuery(schemaName, tableName, columns, safeOrderBy, offset, limit);
 
-  const request = pool.request();
-  if (parameters) {
-    for (const [key, value] of Object.entries(parameters)) {
-      request.input(key, value);
+  const execute = async (request: sql.Request) => {
+    if (parameters) {
+      for (const [key, value] of Object.entries(parameters)) {
+        request.input(key, value);
+      }
     }
-  }
+    return request.query(query);
+  };
 
   const start = Date.now();
-  const result = await request.query(query);
+  const result = await runReadOnly(pool, execute);
   const elapsed = Date.now() - start;
   const { data, truncated, truncation_message } = truncatePayload(result.recordset ?? []);
   return { data, truncated, truncation_message, elapsed };
 }
 
-export function registerTableTools(server: McpServer): void {
+export function registerTableTools(server: McpServer, options: ToolRegistrationOptions): void {
+  const { readOnly } = options;
   server.registerTool(
     "mssql_describe_table_columns",
     {
@@ -108,8 +113,8 @@ export function registerTableTools(server: McpServer): void {
     }
   );
 
-  // Backward-compatible alias
-  server.registerTool(
+  // Backward-compatible alias (hidden in read-only mode)
+  if (!readOnly) server.registerTool(
     "mssql_describe_table",
     {
       title: "Describe Table (deprecated — use mssql_describe_table_columns)",
@@ -192,9 +197,10 @@ export function registerTableTools(server: McpServer): void {
     },
     async ({ tableName, schemaName, columns, limit: rawLimit, offset, whereClause, orderBy, parameters, response_format }) => {
       try {
-        const pool = requirePool();
         validateIdentifier(tableName, "table name");
         validateIdentifier(schemaName, "schema name");
+        if (whereClause) assertSafeWhereClause(whereClause);
+        const pool = requirePool();
         const limit = clampLimit(rawLimit);
 
         const { data, truncated, truncation_message, elapsed } = await fetchTableRows(
@@ -229,8 +235,8 @@ export function registerTableTools(server: McpServer): void {
     }
   );
 
-  // Backward-compatible alias
-  server.registerTool(
+  // Backward-compatible alias (hidden in read-only mode)
+  if (!readOnly) server.registerTool(
     "mssql_get_table_data",
     {
       title: "Get Table Data (deprecated — use mssql_read_table_rows)",
@@ -260,9 +266,10 @@ export function registerTableTools(server: McpServer): void {
     },
     async ({ tableName, schemaName, limit: rawLimit, offset, whereClause, orderBy, parameters, response_format }) => {
       try {
-        const pool = requirePool();
         validateIdentifier(tableName, "table name");
         validateIdentifier(schemaName, "schema name");
+        if (whereClause) assertSafeWhereClause(whereClause);
+        const pool = requirePool();
         const limit = clampLimit(rawLimit);
 
         const { data, truncated, truncation_message, elapsed } = await fetchTableRows(

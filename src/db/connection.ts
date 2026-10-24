@@ -2,23 +2,25 @@ import sql from "mssql";
 import type { DatabaseConfig, ConnectionState } from "../types.js";
 import { POOL_MAX, POOL_MIN, POOL_IDLE_TIMEOUT_MS } from "../constants.js";
 
+export const POOL_DISCARDED_MESSAGE =
+  "Database connection was discarded after a failed rollback; reconnect with mssql_connect_database";
+
+export interface PoolDeps {
+  createPool(config: sql.config): sql.ConnectionPool;
+}
+
+const defaultPoolDeps: PoolDeps = {
+  createPool: (c) => new sql.ConnectionPool(c),
+};
+
 let pool: sql.ConnectionPool | null = null;
 let currentConfig: DatabaseConfig | null = null;
+let poisoned = false;
 
-export async function connectPool(config: DatabaseConfig): Promise<void> {
-  if (pool) {
-    console.error("Closing existing connection...");
-    await pool.close();
-    pool = null;
-  }
-
-  console.error(`Connecting to ${config.server}:${config.port}`);
-
-  const newPool = new sql.ConnectionPool({
+export function buildPoolConfig(config: DatabaseConfig): sql.config {
+  const common: sql.config = {
     server: config.server,
     database: config.database,
-    user: config.user,
-    password: config.password,
     port: config.port,
     options: {
       encrypt: config.encrypt,
@@ -33,7 +35,38 @@ export async function connectPool(config: DatabaseConfig): Promise<void> {
     connectionTimeout: config.connectionTimeout,
     requestTimeout: config.requestTimeout,
     pool: { max: POOL_MAX, min: POOL_MIN, idleTimeoutMillis: POOL_IDLE_TIMEOUT_MS },
-  });
+  };
+
+  if (config.authType === "ntlm") {
+    return {
+      ...common,
+      authentication: {
+        type: "ntlm",
+        options: {
+          domain: config.domain ?? "",
+          userName: config.user ?? "",
+          password: config.password ?? "",
+        },
+      },
+    };
+  }
+
+  return { ...common, user: config.user, password: config.password };
+}
+
+export async function connectPool(
+  config: DatabaseConfig,
+  deps: PoolDeps = defaultPoolDeps,
+): Promise<void> {
+  if (pool) {
+    console.error("Closing existing connection...");
+    await pool.close();
+    pool = null;
+  }
+
+  console.error(`Connecting to ${config.server}:${config.port}`);
+
+  const newPool = deps.createPool(buildPoolConfig(config));
 
   newPool.on("error", (err: Error) => {
     console.error("Pool error:", err);
@@ -43,6 +76,7 @@ export async function connectPool(config: DatabaseConfig): Promise<void> {
     await newPool.connect();
     pool = newPool;
     currentConfig = config;
+    poisoned = false;
     console.error(`Connected to ${config.server}${config.database ? `/${config.database}` : ""}`);
   } catch (err) {
     try { await newPool.close(); } catch { /* ignore */ }
@@ -51,8 +85,25 @@ export async function connectPool(config: DatabaseConfig): Promise<void> {
 }
 
 export async function disconnectPool(): Promise<void> {
+  poisoned = false;
   if (pool) {
     await pool.close();
+    pool = null;
+    currentConfig = null;
+  }
+}
+
+/**
+ * Discards the pool after a failed transaction rollback, when the session state
+ * can no longer be trusted. The pool is marked poisoned before closing so that
+ * requirePool() refuses use even if close() itself fails; the close error propagates.
+ */
+export async function poisonAndClosePool(): Promise<void> {
+  poisoned = true;
+  if (!pool) return;
+  try {
+    await pool.close();
+  } finally {
     pool = null;
     currentConfig = null;
   }
@@ -63,6 +114,9 @@ export function getPool(): sql.ConnectionPool | null {
 }
 
 export function requirePool(): sql.ConnectionPool {
+  if (poisoned) {
+    throw new Error(POOL_DISCARDED_MESSAGE);
+  }
   if (!pool?.connected) {
     throw new Error("No active database connection. Use connect_database first.");
   }
@@ -71,9 +125,15 @@ export function requirePool(): sql.ConnectionPool {
 
 export function getConnectionState(): ConnectionState {
   return {
-    connected: pool?.connected ?? false,
+    connected: !poisoned && (pool?.connected ?? false),
     config: currentConfig
-      ? { server: currentConfig.server, database: currentConfig.database, port: currentConfig.port }
+      ? {
+          server: currentConfig.server,
+          database: currentConfig.database,
+          port: currentConfig.port,
+          auth_type: currentConfig.authType,
+          domain: currentConfig.domain,
+        }
       : null,
     pool_info: pool
       ? { size: pool.size, available: pool.available, pending: pool.pending, borrowed: pool.borrowed }
@@ -82,6 +142,7 @@ export function getConnectionState(): ConnectionState {
 }
 
 export async function closePoolOnShutdown(): Promise<void> {
+  poisoned = false;
   if (pool) {
     try { await pool.close(); } catch { /* ignore */ }
     pool = null;
