@@ -13,7 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Read-only mode on by default (`MSSQL_MCP_READ_ONLY`), described as defense in
   depth: the connected principal's permissions remain the real boundary.
 - `mssql_connection_status` and `mssql_connect_database` report the session
-  login, auth scheme and principal write-privilege hints.
+  login, auth scheme and principal write-privilege hints. Without
+  `VIEW SERVER STATE` the auth scheme falls back to `WINDOWS`/`SQL` from
+  `sys.login_token` (`auth_scheme_source` says which source was used).
 
 ### Changed
 

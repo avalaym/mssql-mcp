@@ -77,13 +77,22 @@ test(
       assert.equal(commit.isError, true);
       assert.match(describeFailure(commit), /forbidden keyword "COMMIT"/);
 
-      const expectedScheme = (process.env.DB_AUTH_TYPE ?? "sql").trim().toLowerCase() === "ntlm" ? "NTLM" : "SQL";
-      const session = (connectResult.structuredContent?.session ?? {}) as {
+      const expectedSchemes =
+        (process.env.DB_AUTH_TYPE ?? "sql").trim().toLowerCase() === "ntlm" ? ["NTLM", "WINDOWS"] : ["SQL"];
+      assert.ok(
+        connectResult.structuredContent?.session,
+        `connect result has no session block; session_error: ${String(connectResult.structuredContent?.session_error)}`
+      );
+      const session = connectResult.structuredContent.session as {
         auth_scheme?: string;
+        auth_scheme_error?: string;
         login_name?: string;
         principal?: { can_write?: boolean };
       };
-      assert.equal(session.auth_scheme, expectedScheme);
+      assert.ok(
+        expectedSchemes.includes(session.auth_scheme as string),
+        `auth_scheme ${String(session.auth_scheme)} not in ${expectedSchemes.join("/")}; auth_scheme_error: ${String(session.auth_scheme_error)}`
+      );
       assert.ok(session.login_name, "login_name present");
       if (process.env.DB_USER === "sa") {
         assert.equal(session.principal?.can_write, true);
@@ -112,9 +121,13 @@ test(
       assert.equal(statusResult.isError, undefined);
       assert.equal(statusResult.structuredContent?.connected, true);
       assert.equal(statusResult.structuredContent?.read_only, true);
-      assert.equal(
-        (statusResult.structuredContent?.session as { auth_scheme?: string } | undefined)?.auth_scheme,
-        expectedScheme
+      assert.ok(
+        statusResult.structuredContent?.session,
+        `status result has no session block; session_error: ${String(statusResult.structuredContent?.session_error)}`
+      );
+      assert.ok(
+        expectedSchemes.includes((statusResult.structuredContent.session as { auth_scheme?: string }).auth_scheme as string),
+        "status auth_scheme matches expected schemes"
       );
 
       const disconnectResult = await callTool(client, "mssql_disconnect_database");
