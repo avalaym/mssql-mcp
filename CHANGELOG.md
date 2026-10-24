@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-10-23
+
 ### Added
 
 - NTLM authentication (`DB_AUTH_TYPE=ntlm`, `DB_DOMAIN`).
