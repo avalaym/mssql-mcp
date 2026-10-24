@@ -1,4 +1,4 @@
-# MS SQL Server MCP Server v3.0.0
+# MS SQL Server MCP Server v3.0.1
 
 🚀 **Model Context Protocol (MCP) server** for Microsoft SQL Server - compatible with Claude Desktop, Cursor, Windsurf and VS Code.
 
@@ -50,7 +50,7 @@ public repositories. Create a
 
 ```bash
 npm install -g @avalaym/mssql-mcp          # latest stable
-npm install -g @avalaym/mssql-mcp@3.0.0    # pin a version
+npm install -g @avalaym/mssql-mcp@3.0.1    # pin a version
 ```
 
 Either way, check the install with:
@@ -119,8 +119,10 @@ To upgrade, install the new release the same way; to remove,
 > Replace with your actual database credentials. Credentials are read from the **server environment only** — never passed as tool parameters.
 >
 > `mssql-mcp-server` is the executable installed in step 1. If your IDE cannot find it on `PATH`, use the absolute path printed by `npm root -g` (e.g. `/usr/local/lib/node_modules/@avalaym/mssql-mcp/dist/src/index.js`) with `"command": "node"`.
+>
+> **New in 3.0.1:** the server starts in **read-only mode** by default (`MSSQL_MCP_READ_ONLY`, see the "Read-only mode" section below); add `"MSSQL_MCP_READ_ONLY": "false"` to the `env` block only when you need writes. To connect with a domain account add `"DB_AUTH_TYPE": "ntlm"` and `"DB_DOMAIN": "EXAMPLE"` and use the bare account name in `DB_USER` (see the "NTLM authentication" section below). `.env` files are loaded only when `"MSSQL_MCP_DOTENV": "1"` is set.
 
-## ��️ Tool Catalog
+## 🧰 Tool Catalog
 
 ### Primary tools (use these)
 
