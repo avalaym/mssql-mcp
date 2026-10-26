@@ -3,7 +3,7 @@
 // that is not a single SELECT/WITH statement and any obvious write, DDL, exec or
 // system-procedure keyword. The DB login should still be read-only as well.
 
-import sql from "mssql";
+import type sql from "mssql";
 import { poisonAndClosePool } from "../db/connection.js";
 import { READ_ONLY_LOCK_TIMEOUT_MS } from "../constants.js";
 import { toActionableError } from "../utils/errors.js";
@@ -109,9 +109,11 @@ export interface RunReadOnlyDeps {
   invalidatePool(): Promise<void>;
 }
 
+// pool.transaction() / tx.request() follow mssql's process-wide driver, so they work for
+// tedious and for msnodesqlv8 (windows auth); new sql.Transaction() is always tedious.
 const defaultRunReadOnlyDeps: RunReadOnlyDeps = {
-  createTransaction: (p) => new sql.Transaction(p),
-  createRequest: (tx) => new sql.Request(tx as sql.Transaction),
+  createTransaction: (p) => p.transaction(),
+  createRequest: (tx) => (tx as sql.Transaction).request(),
   invalidatePool: poisonAndClosePool,
 };
 
