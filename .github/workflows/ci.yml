@@ -117,20 +117,83 @@ jobs:
           DB_ENCRYPT: "true"
           DB_TRUST_SERVER_CERTIFICATE: "true"
 
+  # Windows integrated authentication (DB_AUTH_TYPE=windows) against SQL Server
+  # Express on the runner: the runner account is a Windows login with sysadmin,
+  # and msnodesqlv8 (optional peer dependency) is installed only in this job.
+  integration-windows:
+    name: Integration tests (Windows auth, SQL Server Express)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    needs: [lint, unit]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install SQL Server Express
+        shell: pwsh
+        run: choco install sql-server-express -y --no-progress
+
+      - name: Enable TCP 1433 and restart SQL Server
+        shell: pwsh
+        run: |
+          $inst = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL').SQLEXPRESS
+          $tcp = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$inst\MSSQLServer\SuperSocketNetLib\Tcp"
+          Set-ItemProperty $tcp -Name Enabled -Value 1
+          Set-ItemProperty "$tcp\IPAll" -Name TcpDynamicPorts -Value ''
+          Set-ItemProperty "$tcp\IPAll" -Name TcpPort -Value '1433'
+          Restart-Service 'MSSQL$SQLEXPRESS' -Force
+
+      - name: Pick an ODBC driver for SQL Server
+        shell: pwsh
+        run: |
+          $names = (Get-OdbcDriver -Platform '64-bit').Name
+          $driver = @('ODBC Driver 18 for SQL Server', 'ODBC Driver 17 for SQL Server') | Where-Object { $names -contains $_ } | Select-Object -First 1
+          if (-not $driver) {
+            choco install sqlserver-odbcdriver -y --no-progress
+            $names = (Get-OdbcDriver -Platform '64-bit').Name
+            $driver = @('ODBC Driver 18 for SQL Server', 'ODBC Driver 17 for SQL Server') | Where-Object { $names -contains $_ } | Select-Object -First 1
+          }
+          if (-not $driver) { Write-Error "No ODBC Driver 17/18 for SQL Server available: $($names -join ', ')"; exit 1 }
+          "DB_ODBC_DRIVER=$driver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm install --no-save msnodesqlv8@^6.2.0
+
+      - name: Build
+        run: npm run build
+
+      - name: Integration tests (live SQL Server, Windows auth)
+        run: npm run test:integration
+        env:
+          DB_AUTH_TYPE: windows
+          DB_SERVER: localhost
+          DB_PORT: 1433
+          DB_ENCRYPT: "true"
+          DB_TRUST_SERVER_CERTIFICATE: "true"
+
   # Single required status check for branch protection: goes red if any job
   # above failed, was cancelled, or was skipped.
   ci-ok:
     name: CI passed
     runs-on: ubuntu-latest
     if: always()
-    needs: [lint, unit, integration]
+    needs: [lint, unit, integration, integration-windows]
     steps:
       - name: Check job results
         run: |
-          echo "lint=${{ needs.lint.result }} unit=${{ needs.unit.result }} integration=${{ needs.integration.result }}"
+          echo "lint=${{ needs.lint.result }} unit=${{ needs.unit.result }} integration=${{ needs.integration.result }} integration-windows=${{ needs.integration-windows.result }}"
           if [ "${{ needs.lint.result }}" != "success" ] || \
              [ "${{ needs.unit.result }}" != "success" ] || \
-             [ "${{ needs.integration.result }}" != "success" ]; then
+             [ "${{ needs.integration.result }}" != "success" ] || \
+             [ "${{ needs.integration-windows.result }}" != "success" ]; then
             echo "::error::One or more CI jobs did not succeed."
             exit 1
           fi

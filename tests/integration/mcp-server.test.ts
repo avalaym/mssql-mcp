@@ -77,8 +77,9 @@ test(
       assert.equal(commit.isError, true);
       assert.match(describeFailure(commit), /forbidden keyword "COMMIT"/);
 
+      const authType = (process.env.DB_AUTH_TYPE ?? "sql").trim().toLowerCase();
       const expectedSchemes =
-        (process.env.DB_AUTH_TYPE ?? "sql").trim().toLowerCase() === "ntlm" ? ["NTLM", "WINDOWS"] : ["SQL"];
+        authType === "ntlm" ? ["NTLM", "WINDOWS"] : authType === "windows" ? ["KERBEROS", "NTLM", "WINDOWS"] : ["SQL"];
       assert.ok(
         connectResult.structuredContent?.session,
         `connect result has no session block; session_error: ${String(connectResult.structuredContent?.session_error)}`
@@ -94,6 +95,9 @@ test(
         `auth_scheme ${String(session.auth_scheme)} not in ${expectedSchemes.join("/")}; auth_scheme_error: ${String(session.auth_scheme_error)}`
       );
       assert.ok(session.login_name, "login_name present");
+      if (authType === "windows") {
+        assert.ok(session.login_name?.includes("\\"), `windows login_name ${String(session.login_name)} is DOMAIN\\account`);
+      }
       if (process.env.DB_USER === "sa") {
         assert.equal(session.principal?.can_write, true);
         assert.match(describeFailure(connectResult), /principal can write/);
