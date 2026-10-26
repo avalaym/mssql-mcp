@@ -11,6 +11,10 @@ export const WINDOWS_DRIVER_MISSING_MESSAGE =
   'msnodesqlv8 is not installed. Windows authentication needs it: run "npm install msnodesqlv8" ' +
   'in the server\'s install directory (see README, "Windows integrated authentication").';
 
+export const DRIVER_SWITCH_MESSAGE =
+  "This server process has loaded the Windows (msnodesqlv8) driver, which replaces mssql's driver for the " +
+  "whole process; restart the server to connect with DB_AUTH_TYPE=sql or ntlm.";
+
 export interface WindowsDriver {
   ConnectionPool: typeof sql.ConnectionPool;
 }
@@ -49,6 +53,13 @@ const defaultPoolDeps: PoolDeps = {
 let pool: sql.ConnectionPool | null = null;
 let currentConfig: DatabaseConfig | null = null;
 let poisoned = false;
+// Importing mssql/msnodesqlv8 switches mssql's process-wide driver and mssql has no public
+// way to switch back, so once it is loaded tedious-based modes are refused until restart.
+let windowsDriverLoaded = false;
+
+export function resetWindowsDriverStateForTests(): void {
+  windowsDriverLoaded = false;
+}
 
 // ODBC values in braces with "}" doubled cannot end the value early, so a server or
 // database name cannot inject extra connection-string keywords.
@@ -127,6 +138,9 @@ export async function connectPool(
   deps: Partial<PoolDeps> = {},
 ): Promise<void> {
   const d: PoolDeps = { ...defaultPoolDeps, ...deps };
+  if (windowsDriverLoaded && config.authType !== "windows") {
+    throw new Error(DRIVER_SWITCH_MESSAGE);
+  }
   if (pool) {
     console.error("Closing existing connection...");
     await pool.close();
@@ -136,9 +150,14 @@ export async function connectPool(
   console.error(`Connecting to ${config.server}:${config.port}`);
 
   const poolConfig = buildPoolConfig(config);
-  const newPool = config.authType === "windows"
-    ? new (await d.loadWindowsDriver()).ConnectionPool(poolConfig)
-    : d.createPool(poolConfig);
+  let newPool: sql.ConnectionPool;
+  if (config.authType === "windows") {
+    const driver = await d.loadWindowsDriver();
+    windowsDriverLoaded = true;
+    newPool = new driver.ConnectionPool(poolConfig);
+  } else {
+    newPool = d.createPool(poolConfig);
+  }
 
   newPool.on("error", (err: Error) => {
     console.error("Pool error:", err);

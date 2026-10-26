@@ -3,6 +3,7 @@ import { afterEach, test } from "node:test";
 import type sql from "mssql";
 import {
   connectPool, disconnectPool, getConnectionState, toWindowsDriverLoadError, WINDOWS_DRIVER_MISSING_MESSAGE,
+  DRIVER_SWITCH_MESSAGE, resetWindowsDriverStateForTests,
 } from "../../src/db/connection.js";
 import type { DatabaseConfig } from "../../src/types.js";
 import { getDateClock } from "../../src/utils/format.js";
@@ -22,7 +23,7 @@ function fakePool(): sql.ConnectionPool {
   return p as unknown as sql.ConnectionPool;
 }
 
-afterEach(async () => { await disconnectPool(); });
+afterEach(async () => { await disconnectPool(); resetWindowsDriverStateForTests(); });
 
 test("connectPool - windows builds the pool from the lazily loaded msnodesqlv8 module", async () => {
   const seen: sql.config[] = [];
@@ -81,12 +82,41 @@ test("WINDOWS_DRIVER_MISSING_MESSAGE - names the package, the command and the RE
   assert.match(WINDOWS_DRIVER_MISSING_MESSAGE, /Windows integrated authentication/);
 });
 
-test("connectPool - windows switches the date clock to utc, sql switches it back", async () => {
+test("connectPool - windows switches the date clock to utc, sql leaves it server-local", async () => {
   class FakeConnectionPool { constructor() { return fakePool(); } }
   await connectPool(windowsConfig, {
     loadWindowsDriver: async () => ({ ConnectionPool: FakeConnectionPool as unknown as typeof sql.ConnectionPool }),
   });
   assert.equal(getDateClock(), "utc");
+  resetWindowsDriverStateForTests();
   await connectPool(sqlConfig, { createPool: () => fakePool() });
   assert.equal(getDateClock(), "server-local");
+});
+
+test("connectPool - after the windows driver is loaded, sql/ntlm are refused (mssql's global driver cannot be restored)", async () => {
+  class FakeConnectionPool { constructor() { return fakePool(); } }
+  await connectPool(windowsConfig, {
+    loadWindowsDriver: async () => ({ ConnectionPool: FakeConnectionPool as unknown as typeof sql.ConnectionPool }),
+  });
+  let created = 0;
+  for (const cfg of [sqlConfig, { ...sqlConfig, authType: "ntlm" as const, domain: "EXAMPLE" }]) {
+    await assert.rejects(connectPool(cfg, { createPool: () => { created++; return fakePool(); } }), { message: DRIVER_SWITCH_MESSAGE });
+  }
+  assert.equal(created, 0);
+  // the refused attempt leaves the existing windows connection untouched
+  assert.equal(getConnectionState().connected, true);
+  assert.equal(getConnectionState().config?.auth_type, "windows");
+  // windows again in the same process still works
+  await connectPool(windowsConfig, {
+    loadWindowsDriver: async () => ({ ConnectionPool: FakeConnectionPool as unknown as typeof sql.ConnectionPool }),
+  });
+  assert.equal(getConnectionState().connected, true);
+});
+
+test("connectPool - a failed windows driver load does not block sql afterwards", async () => {
+  await assert.rejects(connectPool(windowsConfig, {
+    loadWindowsDriver: async () => { throw new Error(WINDOWS_DRIVER_MISSING_MESSAGE); },
+  }));
+  await connectPool(sqlConfig, { createPool: () => fakePool() });
+  assert.equal(getConnectionState().connected, true);
 });
