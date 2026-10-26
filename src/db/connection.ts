@@ -6,12 +6,43 @@ import { DEFAULT_ODBC_DRIVER } from "../config.js";
 export const POOL_DISCARDED_MESSAGE =
   "Database connection was discarded after a failed rollback; reconnect with mssql_connect_database";
 
+export const WINDOWS_DRIVER_MISSING_MESSAGE =
+  'msnodesqlv8 is not installed. Windows authentication needs it: run "npm install msnodesqlv8" ' +
+  'in the server\'s install directory (see README, "Windows integrated authentication").';
+
+export interface WindowsDriver {
+  ConnectionPool: typeof sql.ConnectionPool;
+}
+
 export interface PoolDeps {
   createPool(config: sql.config): sql.ConnectionPool;
+  loadWindowsDriver(): Promise<WindowsDriver>;
+}
+
+/** Replaces a missing-msnodesqlv8 error (whose text carries local paths) with the install hint. */
+export function toWindowsDriverLoadError(err: unknown): Error {
+  const e = err as { code?: unknown; message?: unknown } | null;
+  const notFound = e?.code === "ERR_MODULE_NOT_FOUND" || e?.code === "MODULE_NOT_FOUND";
+  if (notFound && String(e?.message).includes("'msnodesqlv8'")) {
+    return new Error(WINDOWS_DRIVER_MISSING_MESSAGE);
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+// Imported only in windows mode: msnodesqlv8 is an optional peer dependency, and loading
+// mssql/msnodesqlv8 switches mssql's process-wide driver away from tedious.
+async function loadWindowsDriver(): Promise<WindowsDriver> {
+  try {
+    const mod = (await import("mssql/msnodesqlv8.js")) as { default?: WindowsDriver } & Partial<WindowsDriver>;
+    return (mod.default ?? mod) as WindowsDriver;
+  } catch (err) {
+    throw toWindowsDriverLoadError(err);
+  }
 }
 
 const defaultPoolDeps: PoolDeps = {
   createPool: (c) => new sql.ConnectionPool(c),
+  loadWindowsDriver,
 };
 
 let pool: sql.ConnectionPool | null = null;
@@ -90,8 +121,9 @@ export function buildPoolConfig(config: DatabaseConfig): sql.config {
 
 export async function connectPool(
   config: DatabaseConfig,
-  deps: PoolDeps = defaultPoolDeps,
+  deps: Partial<PoolDeps> = {},
 ): Promise<void> {
+  const d: PoolDeps = { ...defaultPoolDeps, ...deps };
   if (pool) {
     console.error("Closing existing connection...");
     await pool.close();
@@ -100,7 +132,10 @@ export async function connectPool(
 
   console.error(`Connecting to ${config.server}:${config.port}`);
 
-  const newPool = deps.createPool(buildPoolConfig(config));
+  const poolConfig = buildPoolConfig(config);
+  const newPool = config.authType === "windows"
+    ? new (await d.loadWindowsDriver()).ConnectionPool(poolConfig)
+    : d.createPool(poolConfig);
 
   newPool.on("error", (err: Error) => {
     console.error("Pool error:", err);
