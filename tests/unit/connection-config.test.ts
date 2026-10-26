@@ -49,7 +49,7 @@ test("buildPoolConfig - windows uses msnodesqlv8 with a trusted connection and n
   assert.equal(c.database, "db");
   assert.equal(c.port, 1433);
   assert.deepEqual(c.options, {
-    trustedConnection: true, encrypt: true, trustServerCertificate: false, enableArithAbort: true, useUTC: false,
+    trustedConnection: true, encrypt: true, trustServerCertificate: false, enableArithAbort: true, useUTC: true,
   });
   assert.equal(c.connectionTimeout, 30000);
   assert.equal(c.requestTimeout, 30000);

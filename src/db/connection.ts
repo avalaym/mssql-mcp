@@ -2,6 +2,7 @@ import sql from "mssql";
 import type { DatabaseConfig, ConnectionState } from "../types.js";
 import { POOL_MAX, POOL_MIN, POOL_IDLE_TIMEOUT_MS } from "../constants.js";
 import { DEFAULT_ODBC_DRIVER } from "../config.js";
+import { setDateClock } from "../utils/format.js";
 
 export const POOL_DISCARDED_MESSAGE =
   "Database connection was discarded after a failed rollback; reconnect with mssql_connect_database";
@@ -97,7 +98,9 @@ export function buildPoolConfig(config: DatabaseConfig): sql.config {
       ...common,
       driver: "msnodesqlv8",
       connectionString: buildOdbcConnectionString(config),
-      options: { ...common.options, trustedConnection: true },
+      // msnodesqlv8 shifts datetimeoffset by the local offset when useUTC is false;
+      // with true every type is correct and format.ts reads them with the "utc" clock.
+      options: { ...common.options, trustedConnection: true, useUTC: true },
     };
     return windowsConfig;
   }
@@ -145,6 +148,7 @@ export async function connectPool(
     await newPool.connect();
     pool = newPool;
     currentConfig = config;
+    setDateClock(config.authType === "windows" ? "utc" : "server-local");
     poisoned = false;
     console.error(`Connected to ${config.server}${config.database ? `/${config.database}` : ""}`);
   } catch (err) {

@@ -5,6 +5,7 @@ import {
   connectPool, disconnectPool, getConnectionState, toWindowsDriverLoadError, WINDOWS_DRIVER_MISSING_MESSAGE,
 } from "../../src/db/connection.js";
 import type { DatabaseConfig } from "../../src/types.js";
+import { getDateClock } from "../../src/utils/format.js";
 
 const sqlConfig: DatabaseConfig = { server: "localhost", port: 1433, encrypt: true, trustServerCertificate: false,
   connectionTimeout: 30000, requestTimeout: 30000, authType: "sql", user: "analyst", password: "pw-123456" };
@@ -78,4 +79,14 @@ test("WINDOWS_DRIVER_MISSING_MESSAGE - names the package, the command and the RE
   assert.match(WINDOWS_DRIVER_MISSING_MESSAGE, /msnodesqlv8 is not installed/);
   assert.match(WINDOWS_DRIVER_MISSING_MESSAGE, /npm install msnodesqlv8/);
   assert.match(WINDOWS_DRIVER_MISSING_MESSAGE, /Windows integrated authentication/);
+});
+
+test("connectPool - windows switches the date clock to utc, sql switches it back", async () => {
+  class FakeConnectionPool { constructor() { return fakePool(); } }
+  await connectPool(windowsConfig, {
+    loadWindowsDriver: async () => ({ ConnectionPool: FakeConnectionPool as unknown as typeof sql.ConnectionPool }),
+  });
+  assert.equal(getDateClock(), "utc");
+  await connectPool(sqlConfig, { createPool: () => fakePool() });
+  assert.equal(getDateClock(), "server-local");
 });

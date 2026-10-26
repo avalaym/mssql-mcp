@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { formatDisplayValue, normalizeOutput } from "../../src/utils/format.js";
+import { formatDisplayValue, normalizeOutput, setDateClock } from "../../src/utils/format.js";
 
 // Type stubs — getTypeName() uses function.name lowercased,
 // or falls back to object.name property.
@@ -203,4 +203,30 @@ test("normalizeOutput - recordset rows get the same depth budget as plain object
   assert.equal(viaRecordset, viaPlain);
   assert.ok(viaPlain.includes("max depth exceeded"));
   assert.ok(!viaPlain.includes("leaf"));
+});
+
+// --- utc date clock (msnodesqlv8 / windows auth, pool created with useUTC: true) ---
+
+test("setDateClock utc - naive types are read with UTC getters, datetimeoffset unchanged", () => {
+  setDateClock("utc");
+  try {
+    const wall = new Date(Date.UTC(2026, 9, 26, 9, 15, 30, 123));
+    const rows = Object.assign([{ dt2: wall, dt: wall, d: new Date(Date.UTC(2026, 9, 26)), t: new Date(Date.UTC(1970, 0, 1, 9, 15, 30, 123)), dto: new Date(Date.UTC(2026, 9, 26, 15, 15, 30, 123)) }], {
+      columns: {
+        dt2: { type: { name: "DateTime2" } }, dt: { type: { name: "DateTime" } }, d: { type: { name: "Date" } },
+        t: { type: { name: "Time" } }, dto: { type: { name: "DateTimeOffset" } },
+      },
+    });
+    assert.deepEqual(normalizeOutput(rows), [{
+      dt2: "2026-10-26 09:15:30.123", dt: "2026-10-26 09:15:30.123", d: "2026-10-26", t: "09:15:30.123", dto: "2026-10-26 15:15:30.123",
+    }]);
+  } finally {
+    setDateClock("server-local");
+  }
+});
+
+test("setDateClock server-local - naive types keep the local getters (tedious default)", () => {
+  setDateClock("server-local");
+  const local = new Date(2026, 9, 26, 9, 15, 30, 123);
+  assert.equal(formatDisplayValue(local, { type: { name: "DateTime2" } }), "2026-10-26 09:15:30.123");
 });

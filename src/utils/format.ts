@@ -61,6 +61,25 @@ function buildFraction(date: DateWithPrecision, milliseconds: number, scale?: nu
   return base.replace(/0+$/, "");
 }
 
+/**
+ * How Date values of the zone-less types (datetime, datetime2, smalldatetime, date, time)
+ * carry the server's wall clock. tedious (useUTC: false) puts it in the local getters.
+ * msnodesqlv8 is created with useUTC: true, because with useUTC: false it shifts
+ * datetimeoffset by the local offset; the wall clock is then in the UTC getters.
+ * Set by connectPool for the single global connection.
+ */
+export type DateClock = "server-local" | "utc";
+
+let dateClock: DateClock = "server-local";
+
+export function setDateClock(clock: DateClock): void {
+  dateClock = clock;
+}
+
+export function getDateClock(): DateClock {
+  return dateClock;
+}
+
 function formatDateParts(date: Date, useUtcClock: boolean) {
   return {
     year: useUtcClock ? date.getUTCFullYear() : date.getFullYear(),
@@ -75,7 +94,7 @@ function formatDateParts(date: Date, useUtcClock: boolean) {
 
 function formatDateValue(date: Date, column?: { type?: unknown; scale?: number }): string {
   const typeName = getTypeName(column)?.toLowerCase();
-  const useUtcClock = typeName === "datetimeoffset";
+  const useUtcClock = typeName === "datetimeoffset" || dateClock === "utc";
   const parts = formatDateParts(date, useUtcClock);
   const fraction = buildFraction(date as DateWithPrecision, parts.milliseconds, column?.scale);
   const dateText = `${pad(parts.year, 4)}-${pad(parts.month, 2)}-${pad(parts.day, 2)}`;

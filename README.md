@@ -305,7 +305,8 @@ exec /mnt/c/path/to/node.exe 'C:\path\to\node_modules\@avalaym\mssql-mcp\dist\sr
 **Differences from `sql`/`ntlm`**
 
 - Uses the `msnodesqlv8` (ODBC) driver instead of `tedious`.
-- Fractional seconds of `datetime2`, `time` and `datetimeoffset` are limited to milliseconds, and column scale metadata is not available.
+- Column scale metadata is not available, so fractional seconds are shown without trailing zeros (a `datetime2(2)` value of `.50` is shown as `.5`); full precision up to 100 ns is kept.
+- The pool is created with `useUTC: true` (with `false`, `msnodesqlv8` shifts `datetimeoffset` values by the local UTC offset). Values are formatted the same way as in the other modes: `datetime`/`datetime2`/`date`/`time` as the server's wall clock, `datetimeoffset` in UTC.
 - `mssql_connection_status` reports `auth_type: "windows"` and no `domain`; `session.login_name` shows the effective `DOMAIN\account`.
 
 ## 📄 Pagination
