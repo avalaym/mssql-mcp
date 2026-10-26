@@ -16,7 +16,7 @@ export interface ToolResult<T = unknown> {
   truncation_message?: string;
 }
 
-export type AuthType = "sql" | "ntlm";
+export type AuthType = "sql" | "ntlm" | "windows";
 
 export interface DatabaseConfig {
   server: string;
@@ -25,6 +25,7 @@ export interface DatabaseConfig {
   password?: string;
   authType: AuthType;
   domain?: string;
+  odbcDriver?: string;
   port: number;
   encrypt: boolean;
   trustServerCertificate: boolean;
