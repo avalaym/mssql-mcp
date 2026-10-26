@@ -135,9 +135,20 @@ jobs:
           node-version: 22.x
           cache: 'npm'
 
+      # The Chocolatey feed has transient 5xx errors, and choco can exit 0 having
+      # installed nothing, so retry and check that the instance actually exists.
       - name: Install SQL Server Express
         shell: pwsh
-        run: choco install sql-server-express -y --no-progress
+        run: |
+          $key = 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL'
+          for ($i = 1; $i -le 3; $i++) {
+            choco install sql-server-express -y --no-progress
+            if ((Test-Path $key) -and (Get-ItemProperty $key).SQLEXPRESS) { exit 0 }
+            Write-Warning "SQL Server Express not installed after attempt $i"
+            Start-Sleep -Seconds (30 * $i)
+          }
+          Write-Error "SQL Server Express could not be installed after 3 attempts"
+          exit 1
 
       - name: Enable TCP 1433 and restart SQL Server
         shell: pwsh
