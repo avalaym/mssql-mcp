@@ -1,6 +1,7 @@
 import sql from "mssql";
 import type { DatabaseConfig, ConnectionState } from "../types.js";
 import { POOL_MAX, POOL_MIN, POOL_IDLE_TIMEOUT_MS } from "../constants.js";
+import { DEFAULT_ODBC_DRIVER } from "../config.js";
 
 export const POOL_DISCARDED_MESSAGE =
   "Database connection was discarded after a failed rollback; reconnect with mssql_connect_database";
@@ -16,6 +17,26 @@ const defaultPoolDeps: PoolDeps = {
 let pool: sql.ConnectionPool | null = null;
 let currentConfig: DatabaseConfig | null = null;
 let poisoned = false;
+
+// ODBC values in braces with "}" doubled cannot end the value early, so a server or
+// database name cannot inject extra connection-string keywords.
+function odbcQuote(value: string): string {
+  return `{${value.replaceAll("}", "}}")}}`;
+}
+
+function buildOdbcConnectionString(config: DatabaseConfig): string {
+  const parts = [
+    `Driver=${odbcQuote(config.odbcDriver ?? DEFAULT_ODBC_DRIVER)}`,
+    `Server=${odbcQuote(`${config.server},${config.port}`)}`,
+  ];
+  if (config.database) parts.push(`Database=${odbcQuote(config.database)}`);
+  parts.push(
+    "Trusted_Connection=yes",
+    `Encrypt=${config.encrypt ? "yes" : "no"}`,
+    `TrustServerCertificate=${config.trustServerCertificate ? "yes" : "no"}`,
+  );
+  return `${parts.join(";")};`;
+}
 
 export function buildPoolConfig(config: DatabaseConfig): sql.config {
   const common: sql.config = {
@@ -36,6 +57,19 @@ export function buildPoolConfig(config: DatabaseConfig): sql.config {
     requestTimeout: config.requestTimeout,
     pool: { max: POOL_MAX, min: POOL_MIN, idleTimeoutMillis: POOL_IDLE_TIMEOUT_MS },
   };
+
+  if (config.authType === "windows") {
+    // mssql's own msnodesqlv8 builder drops TrustServerCertificate and defaults to the
+    // retired "SQL Server Native Client 11.0" driver on Windows, so the string is explicit.
+    // At runtime mssql reads it from the top level, though @types/mssql puts it in options.
+    const windowsConfig: sql.config & { connectionString: string } = {
+      ...common,
+      driver: "msnodesqlv8",
+      connectionString: buildOdbcConnectionString(config),
+      options: { ...common.options, trustedConnection: true },
+    };
+    return windowsConfig;
+  }
 
   if (config.authType === "ntlm") {
     return {
