@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-26
+
+### Added
+
+- Windows integrated authentication (`DB_AUTH_TYPE=windows`): logs in as the
+  Windows account running the server through SSPI (Kerberos), with no user,
+  password or domain. Windows only; uses the `msnodesqlv8` ODBC driver, an
+  optional peer dependency loaded only in this mode. `DB_ODBC_DRIVER` picks the
+  ODBC driver (default "ODBC Driver 17 for SQL Server").
+
+### Changed
+
+- The read-only transaction is created through the connection pool
+  (`pool.transaction()`), so it uses whichever `mssql` driver is active.
+
 ## [3.0.1] - 2026-10-23
 
 ### Added

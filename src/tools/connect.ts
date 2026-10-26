@@ -13,7 +13,7 @@ export function registerConnectTools(server: McpServer, options: ToolRegistratio
       title: "Connect Database",
       description:
         "Connects to MS SQL Server using environment variables (DB_SERVER, DB_DATABASE, DB_USER, DB_PASSWORD, " +
-        "DB_PORT, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE, DB_AUTH_TYPE (sql|ntlm), DB_DOMAIN). No credentials accepted as parameters — all " +
+        "DB_PORT, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE, DB_AUTH_TYPE (sql|ntlm|windows), DB_DOMAIN, DB_ODBC_DRIVER). No credentials accepted as parameters — all " +
         "connection settings come from the server environment only. The result reports the session identity and the principal's " +
         "privilege hints. Idempotent: calling again reconnects.",
       inputSchema: z.object({}),

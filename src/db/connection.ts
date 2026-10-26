@@ -1,21 +1,85 @@
 import sql from "mssql";
 import type { DatabaseConfig, ConnectionState } from "../types.js";
 import { POOL_MAX, POOL_MIN, POOL_IDLE_TIMEOUT_MS } from "../constants.js";
+import { DEFAULT_ODBC_DRIVER } from "../config.js";
+import { setDateClock } from "../utils/format.js";
 
 export const POOL_DISCARDED_MESSAGE =
   "Database connection was discarded after a failed rollback; reconnect with mssql_connect_database";
 
+export const WINDOWS_DRIVER_MISSING_MESSAGE =
+  'msnodesqlv8 is not installed. Windows authentication needs it: run "npm install msnodesqlv8" ' +
+  'in the server\'s install directory (see README, "Windows integrated authentication").';
+
+export const DRIVER_SWITCH_MESSAGE =
+  "This server process has loaded the Windows (msnodesqlv8) driver, which replaces mssql's driver for the " +
+  "whole process; restart the server to connect with DB_AUTH_TYPE=sql or ntlm.";
+
+export interface WindowsDriver {
+  ConnectionPool: typeof sql.ConnectionPool;
+}
+
 export interface PoolDeps {
   createPool(config: sql.config): sql.ConnectionPool;
+  loadWindowsDriver(): Promise<WindowsDriver>;
+}
+
+/** Replaces a missing-msnodesqlv8 error (whose text carries local paths) with the install hint. */
+export function toWindowsDriverLoadError(err: unknown): Error {
+  const e = err as { code?: unknown; message?: unknown } | null;
+  const notFound = e?.code === "ERR_MODULE_NOT_FOUND" || e?.code === "MODULE_NOT_FOUND";
+  if (notFound && String(e?.message).includes("'msnodesqlv8'")) {
+    return new Error(WINDOWS_DRIVER_MISSING_MESSAGE);
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+// Imported only in windows mode: msnodesqlv8 is an optional peer dependency, and loading
+// mssql/msnodesqlv8 switches mssql's process-wide driver away from tedious.
+async function loadWindowsDriver(): Promise<WindowsDriver> {
+  try {
+    const mod = (await import("mssql/msnodesqlv8.js")) as { default?: WindowsDriver } & Partial<WindowsDriver>;
+    return (mod.default ?? mod) as WindowsDriver;
+  } catch (err) {
+    throw toWindowsDriverLoadError(err);
+  }
 }
 
 const defaultPoolDeps: PoolDeps = {
   createPool: (c) => new sql.ConnectionPool(c),
+  loadWindowsDriver,
 };
 
 let pool: sql.ConnectionPool | null = null;
 let currentConfig: DatabaseConfig | null = null;
 let poisoned = false;
+// Importing mssql/msnodesqlv8 switches mssql's process-wide driver and mssql has no public
+// way to switch back, so once it is loaded tedious-based modes are refused until restart.
+let windowsDriverLoaded = false;
+
+export function resetWindowsDriverStateForTests(): void {
+  windowsDriverLoaded = false;
+}
+
+// ODBC values in braces with "}" doubled cannot end the value early, so a server or
+// database name cannot inject extra connection-string keywords.
+function odbcQuote(value: string): string {
+  return `{${value.replaceAll("}", "}}")}}`;
+}
+
+function buildOdbcConnectionString(config: DatabaseConfig): string {
+  const parts = [
+    `Driver=${odbcQuote(config.odbcDriver ?? DEFAULT_ODBC_DRIVER)}`,
+    `Server=${odbcQuote(`${config.server},${config.port}`)}`,
+  ];
+  if (config.database) parts.push(`Database=${odbcQuote(config.database)}`);
+  parts.push(
+    "Trusted_Connection=yes",
+    `Encrypt=${config.encrypt ? "yes" : "no"}`,
+    `TrustServerCertificate=${config.trustServerCertificate ? "yes" : "no"}`,
+  );
+  return `${parts.join(";")};`;
+}
 
 export function buildPoolConfig(config: DatabaseConfig): sql.config {
   const common: sql.config = {
@@ -37,6 +101,21 @@ export function buildPoolConfig(config: DatabaseConfig): sql.config {
     pool: { max: POOL_MAX, min: POOL_MIN, idleTimeoutMillis: POOL_IDLE_TIMEOUT_MS },
   };
 
+  if (config.authType === "windows") {
+    // mssql's own msnodesqlv8 builder drops TrustServerCertificate and defaults to the
+    // retired "SQL Server Native Client 11.0" driver on Windows, so the string is explicit.
+    // At runtime mssql reads it from the top level, though @types/mssql puts it in options.
+    const windowsConfig: sql.config & { connectionString: string } = {
+      ...common,
+      driver: "msnodesqlv8",
+      connectionString: buildOdbcConnectionString(config),
+      // msnodesqlv8 shifts datetimeoffset by the local offset when useUTC is false;
+      // with true every type is correct and format.ts reads them with the "utc" clock.
+      options: { ...common.options, trustedConnection: true, useUTC: true },
+    };
+    return windowsConfig;
+  }
+
   if (config.authType === "ntlm") {
     return {
       ...common,
@@ -56,8 +135,12 @@ export function buildPoolConfig(config: DatabaseConfig): sql.config {
 
 export async function connectPool(
   config: DatabaseConfig,
-  deps: PoolDeps = defaultPoolDeps,
+  deps: Partial<PoolDeps> = {},
 ): Promise<void> {
+  const d: PoolDeps = { ...defaultPoolDeps, ...deps };
+  if (windowsDriverLoaded && config.authType !== "windows") {
+    throw new Error(DRIVER_SWITCH_MESSAGE);
+  }
   if (pool) {
     console.error("Closing existing connection...");
     await pool.close();
@@ -66,7 +149,15 @@ export async function connectPool(
 
   console.error(`Connecting to ${config.server}:${config.port}`);
 
-  const newPool = deps.createPool(buildPoolConfig(config));
+  const poolConfig = buildPoolConfig(config);
+  let newPool: sql.ConnectionPool;
+  if (config.authType === "windows") {
+    const driver = await d.loadWindowsDriver();
+    windowsDriverLoaded = true;
+    newPool = new driver.ConnectionPool(poolConfig);
+  } else {
+    newPool = d.createPool(poolConfig);
+  }
 
   newPool.on("error", (err: Error) => {
     console.error("Pool error:", err);
@@ -76,6 +167,7 @@ export async function connectPool(
     await newPool.connect();
     pool = newPool;
     currentConfig = config;
+    setDateClock(config.authType === "windows" ? "utc" : "server-local");
     poisoned = false;
     console.error(`Connected to ${config.server}${config.database ? `/${config.database}` : ""}`);
   } catch (err) {

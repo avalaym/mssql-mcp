@@ -1,4 +1,4 @@
-# MS SQL Server MCP Server v3.0.1
+# MS SQL Server MCP Server v3.1.0
 
 🚀 **Model Context Protocol (MCP) server** for Microsoft SQL Server - compatible with Claude Desktop, Cursor, Windsurf and VS Code.
 
@@ -50,7 +50,7 @@ public repositories. Create a
 
 ```bash
 npm install -g @avalaym/mssql-mcp          # latest stable
-npm install -g @avalaym/mssql-mcp@3.0.1    # pin a version
+npm install -g @avalaym/mssql-mcp@3.1.0    # pin a version
 ```
 
 Either way, check the install with:
@@ -122,6 +122,8 @@ To upgrade, install the new release the same way; to remove,
 >
 > **New in 3.0.1:** the server starts in **read-only mode** by default (`MSSQL_MCP_READ_ONLY`, see the "Read-only mode" section below); add `"MSSQL_MCP_READ_ONLY": "false"` to the `env` block only when you need writes. To connect with a domain account add `"DB_AUTH_TYPE": "ntlm"` and `"DB_DOMAIN": "EXAMPLE"` and use the bare account name in `DB_USER` (see the "NTLM authentication" section below). `.env` files are loaded only when `"MSSQL_MCP_DOTENV": "1"` is set.
 
+> **New in 3.1.0:** `"DB_AUTH_TYPE": "windows"` logs in with the Windows session of the server process (Kerberos), with no user or password. It runs only on Windows and needs `msnodesqlv8` (see the "Windows integrated authentication" section below).
+
 ## 🧰 Tool Catalog
 
 ### Primary tools (use these)
@@ -182,8 +184,9 @@ MCP_TRANSPORT=http MCP_HOST=0.0.0.0 MCP_PORT=8080 node dist/src/index.js
 | `DB_DATABASE` | ❌ | — | Database name |
 | `DB_USER` | ❌ | — | Login username |
 | `DB_PASSWORD` | ❌ | — | Login password |
-| `DB_AUTH_TYPE` | ❌ | `sql` | `sql` or `ntlm` (see NTLM authentication below) |
+| `DB_AUTH_TYPE` | ❌ | `sql` | `sql`, `ntlm` or `windows` (see the NTLM and Windows integrated authentication sections below) |
 | `DB_DOMAIN` | With `ntlm` | — | Windows/AD domain; required when `DB_AUTH_TYPE=ntlm` |
+| `DB_ODBC_DRIVER` | ❌ | `ODBC Driver 17 for SQL Server` | ODBC driver used when `DB_AUTH_TYPE=windows` |
 | `DB_PORT` | ❌ | 1433 | TCP port |
 | `DB_ENCRYPT` | ❌ | true | Enable TLS (required for Azure SQL) |
 | `DB_TRUST_SERVER_CERTIFICATE` | ❌ | false | Trust self-signed certs |
@@ -269,6 +272,42 @@ DB_SERVER=localhost
 ```bash
 DB_AUTH_TYPE=ntlm DB_DOMAIN=... DB_USER=... DB_PASSWORD=... DB_SERVER=... npm run test:integration
 ```
+
+- Some domains or servers refuse NTLM. The login then fails with `Login failed. The login is from an untrusted domain and cannot be used with Integrated authentication.` even with a correct password. Use Windows integrated authentication below instead.
+
+## 🪟 Windows integrated authentication
+
+Set `DB_AUTH_TYPE=windows` to log in as the Windows account that runs the server process, through SSPI (Kerberos, or NTLM if Windows negotiates it). No user, password or domain is configured: `DB_USER`, `DB_PASSWORD` and `DB_DOMAIN` are ignored, and the server prints one line to stderr naming (never showing) any of them that are set.
+
+```bash
+DB_AUTH_TYPE=windows
+DB_SERVER=sqlhost.example.test
+DB_DATABASE=...
+# optional: DB_ODBC_DRIVER=ODBC Driver 18 for SQL Server
+```
+
+**Prerequisites**
+
+- The server runs on Windows (`DB_AUTH_TYPE=windows` on Linux or macOS fails at startup with an error).
+- Node.js 20 or later. Tested with Node 22 (x64).
+- An ODBC driver for SQL Server: "ODBC Driver 17 for SQL Server" (default) or 18 via `DB_ODBC_DRIVER`.
+- The optional `msnodesqlv8` package next to the server: `npm install msnodesqlv8` in the directory where `@avalaym/mssql-mcp` is installed. It ships prebuilt binaries per Node.js version; on a Node.js version without one, npm builds it from source, which needs Visual Studio Build Tools with the C++ workload.
+
+**From WSL.** The server must run under the Windows `node.exe`, not the Linux one. Install the package and `msnodesqlv8` with the Windows `npm`, then launch it from WSL through a script. WSL passes environment variables to Windows programs only when they are listed in `WSLENV`:
+
+```bash
+#!/usr/bin/env bash
+export DB_AUTH_TYPE=windows DB_SERVER=sqlhost.example.test DB_DATABASE=... MSSQL_MCP_READ_ONLY=true
+export WSLENV=DB_AUTH_TYPE:DB_SERVER:DB_DATABASE:DB_PORT:DB_ENCRYPT:DB_TRUST_SERVER_CERTIFICATE:DB_ODBC_DRIVER:DB_CONNECTION_TIMEOUT:DB_REQUEST_TIMEOUT:MSSQL_MCP_READ_ONLY:MCP_TRANSPORT
+exec /mnt/c/path/to/node.exe 'C:\path\to\node_modules\@avalaym\mssql-mcp\dist\src\index.js'
+```
+
+**Differences from `sql`/`ntlm`**
+
+- Uses the `msnodesqlv8` (ODBC) driver instead of `tedious`. Loading it replaces `mssql`'s driver for the whole process, so once a `windows` connection has been attempted (even one that failed after the driver loaded), the same server process refuses `sql`/`ntlm` connections until it is restarted.
+- Column scale metadata is not available, so fractional seconds are shown without trailing zeros (a `datetime2(2)` value of `.50` is shown as `.5`); full precision up to 100 ns is kept.
+- The pool is created with `useUTC: true` (with `false`, `msnodesqlv8` shifts `datetimeoffset` values by the local UTC offset). Values are formatted the same way as in the other modes: `datetime`/`datetime2`/`date`/`time` as the server's wall clock, `datetimeoffset` in UTC.
+- `mssql_connection_status` reports `auth_type: "windows"` and no `domain`; `session.login_name` shows the effective `DOMAIN\account`.
 
 ## 📄 Pagination
 

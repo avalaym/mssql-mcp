@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
-import { test } from "node:test";
-import { ConfigSchema, loadHttpConfig, loadConfigFromEnv } from "../../src/config.js";
+import { beforeEach, test } from "node:test";
+import { ConfigSchema, loadHttpConfig, loadConfigFromEnv, resetWindowsCredentialNoticeForTests } from "../../src/config.js";
 
 // --- ConfigSchema ---
 
@@ -203,7 +203,7 @@ test("loadConfigFromEnv - empty DB_AUTH_TYPE means sql", () => {
 
 test("loadConfigFromEnv - unknown DB_AUTH_TYPE", () => {
   assert.throws(() => loadConfigFromEnv({ ...base, DB_AUTH_TYPE: "kerberos" }),
-    { message: 'DB_AUTH_TYPE must be "sql" or "ntlm"' });
+    { message: 'DB_AUTH_TYPE must be "sql", "ntlm" or "windows"' });
 });
 
 test("loadConfigFromEnv - ntlm without domain", () => {
@@ -236,4 +236,83 @@ test("loadConfigFromEnv - no error message leaks user, domain or password", () =
       return true;
     });
   }
+});
+
+// --- DB_AUTH_TYPE=windows ---
+
+beforeEach(() => resetWindowsCredentialNoticeForTests());
+
+const win = { platform: "win32" as NodeJS.Platform, warn: () => {} };
+
+test("loadConfigFromEnv - windows, case and whitespace tolerant, drops user/password/domain", () => {
+  const c = loadConfigFromEnv(
+    { ...base, DB_AUTH_TYPE: " Windows ", DB_USER: "analyst", DB_PASSWORD: SECRET, DB_DOMAIN: "EXAMPLE" },
+    win,
+  );
+  assert.equal(c.authType, "windows");
+  assert.equal(c.user, undefined);
+  assert.equal(c.password, undefined);
+  assert.equal(c.domain, undefined);
+  assert.equal(JSON.stringify(c).includes(SECRET), false);
+});
+
+test("loadConfigFromEnv - windows needs no credentials", () => {
+  const c = loadConfigFromEnv({ ...base, DB_AUTH_TYPE: "windows" }, win);
+  assert.equal(c.authType, "windows");
+});
+
+test("loadConfigFromEnv - windows on a non-Windows platform", () => {
+  assert.throws(
+    () => loadConfigFromEnv({ ...base, DB_AUTH_TYPE: "windows" }, { platform: "linux", warn: () => {} }),
+    { message: "DB_AUTH_TYPE=windows requires running the server on Windows (current platform: linux)" },
+  );
+});
+
+test("loadConfigFromEnv - DB_ODBC_DRIVER default and override", () => {
+  assert.equal(loadConfigFromEnv({ ...base, DB_AUTH_TYPE: "windows" }, win).odbcDriver, "ODBC Driver 17 for SQL Server");
+  assert.equal(
+    loadConfigFromEnv({ ...base, DB_AUTH_TYPE: "windows", DB_ODBC_DRIVER: "ODBC Driver 18 for SQL Server" }, win).odbcDriver,
+    "ODBC Driver 18 for SQL Server",
+  );
+});
+
+test("loadConfigFromEnv - invalid DB_ODBC_DRIVER is rejected without echoing it", () => {
+  assert.throws(
+    () => loadConfigFromEnv({ ...base, DB_AUTH_TYPE: "windows", DB_ODBC_DRIVER: "x}; Uid=y" }, win),
+    (err: Error) => {
+      assert.equal(err.message, "DB_ODBC_DRIVER may contain only letters, digits, spaces, '.', '_' and '-'");
+      assert.equal(String(err.message).includes("Uid=y"), false);
+      return true;
+    },
+  );
+});
+
+test("loadConfigFromEnv - windows ignored-credentials notice: exact text, names only, once per process", () => {
+  const lines: string[] = [];
+  const opts = { platform: "win32" as NodeJS.Platform, warn: (m: string) => lines.push(m) };
+  const env = { ...base, DB_AUTH_TYPE: "windows", DB_PASSWORD: SECRET, DB_USER: "analyst" };
+  loadConfigFromEnv(env, opts);
+  loadConfigFromEnv(env, opts);
+  assert.deepEqual(lines, [
+    "DB_AUTH_TYPE=windows: ignoring DB_USER, DB_PASSWORD (Windows authentication uses the process logon session)",
+  ]);
+  assert.equal(lines.join("").includes(SECRET), false);
+  assert.equal(lines.join("").includes("analyst"), false);
+});
+
+test("loadConfigFromEnv - windows notice lists DB_DOMAIN alone and is silent without credentials", () => {
+  const lines: string[] = [];
+  const opts = { platform: "win32" as NodeJS.Platform, warn: (m: string) => lines.push(m) };
+  loadConfigFromEnv({ ...base, DB_AUTH_TYPE: "windows" }, opts);
+  assert.deepEqual(lines, []);
+  loadConfigFromEnv({ ...base, DB_AUTH_TYPE: "windows", DB_DOMAIN: "EXAMPLE" }, opts);
+  assert.deepEqual(lines, [
+    "DB_AUTH_TYPE=windows: ignoring DB_DOMAIN (Windows authentication uses the process logon session)",
+  ]);
+});
+
+test("loadConfigFromEnv - sql and ntlm never consult the platform", () => {
+  const opts = { platform: "linux" as NodeJS.Platform, warn: () => {} };
+  assert.equal(loadConfigFromEnv({ ...base }, opts).authType, "sql");
+  assert.equal(loadConfigFromEnv({ ...base }, opts).odbcDriver, undefined);
 });

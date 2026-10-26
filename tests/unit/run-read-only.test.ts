@@ -134,3 +134,17 @@ test("(q) post boundary query fails -> the LOCK_TIMEOUT reset still runs", async
   await assert.rejects(runReadOnly(h.pool, async () => 1, h.deps), /cleanup failed \(post boom\)/);
   assert.ok(h.log.includes("batch:SET LOCK_TIMEOUT -1"));
 });
+
+test("default deps create the transaction and request through the pool's active driver", async () => {
+  const h = harness();
+  const tx = {
+    ...(h.deps.createTransaction() as object),
+    request: () => { h.log.push("tx.request"); return h.deps.createRequest(); },
+  };
+  const pool = { transaction: () => { h.log.push("pool.transaction"); return tx; } } as unknown as sql.ConnectionPool;
+  const r = await runReadOnly(pool, async (req) => (await req.query("SELECT 1")).recordset, { invalidatePool: h.deps.invalidatePool });
+  assert.deepEqual(r, [{ v: 1 }]);
+  assert.equal(h.log[0], "pool.transaction");
+  assert.ok(h.log.includes("tx.request"));
+  assert.ok(h.log.includes("rollback"));
+});
