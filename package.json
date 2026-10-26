@@ -1,6 +1,6 @@
 {
   "name": "@avalaym/mssql-mcp",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "MCP Server for MS SQL Server integration with Claude Desktop, Cursor, Windsurf and VS Code",
   "main": "dist/src/index.js",
   "type": "module",
